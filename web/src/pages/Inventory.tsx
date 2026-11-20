@@ -13,7 +13,8 @@ interface StockRow {
   list_price: number; is_active: number; stock_status: string;
 }
 
-export function InventoryPage() {
+/** Stock list tab: every item × warehouse with on-hand, reorder point and value. */
+export function StockListPage() {
   const { data: meta } = useMeta();
   const [f, set] = useUrlState({ q: "", warehouse_id: "", category_id: "", stock_status: "", sort: "value", dir: "desc", page: "1" });
   const { data, error, isLoading, isFetching } = useApi<Paged<StockRow> & { summary: { item_locations: number; value: number; out_of_stock: number; low: number } }>(
@@ -22,12 +23,11 @@ export function InventoryPage() {
 
   return (
     <>
-      <PageHeader title="Inventory" description="Stock by item × warehouse at moving-average cost. Reorder point drives automatic purchase orders." />
       <div className="mb-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Kpi label="Stock value (filtered)" icon={Boxes} value={s ? bahtCompact(s.value) : "—"} />
         <Kpi label="Item-locations" icon={Warehouse} value={s ? num(s.item_locations) : "—"} />
-        <Kpi label="Below reorder point" icon={AlertTriangle} value={s ? num(s.low) : "—"} tone={s?.low ? "warning" : "success"} sub={s?.low ? "Replenishment pending" : "All above reorder point"} to="?stock_status=low" />
-        <Kpi label="Out of stock" icon={PackageX} value={s ? num(s.out_of_stock) : "—"} tone={s?.out_of_stock ? "danger" : "success"} sub={s?.out_of_stock ? "Blocking order shipments" : "Nothing blocked"} to="?stock_status=out" />
+        <Kpi label="Below reorder point" icon={AlertTriangle} value={s ? num(s.low) : "—"} tone={s?.low ? "warning" : "success"} sub={s?.low ? "Replenishment pending" : "All above reorder point"} to="?tab=list&stock_status=low" />
+        <Kpi label="Out of stock" icon={PackageX} value={s ? num(s.out_of_stock) : "—"} tone={s?.out_of_stock ? "danger" : "success"} sub={s?.out_of_stock ? "Blocking order shipments" : "Nothing blocked"} to="?tab=list&stock_status=out" />
       </div>
       <FilterBar>
         <SearchInput value={f.q} onChange={(q) => set({ q })} placeholder="SKU, product or brand" />
