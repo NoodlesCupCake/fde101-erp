@@ -64,11 +64,13 @@ export function Badge({ tone = "neutral", children }: { tone?: Tone; children: R
 
 const STATUS_TONE: Record<string, Tone> = {
   OPEN: "info", INVOICED: "success", CANCELLED: "neutral", RECEIVED: "success", CLOSED_SHORT: "warning",
+  PARTIALLY_RECEIVED: "info", ON_HOLD: "danger", PENDING_APPROVAL: "warning", CONVERTED: "success", REJECTED: "danger",
+  AWARDED: "success",
   PAID: "success", PARTIALLY_PAID: "warning",
-  ok: "success", low: "warning", out: "danger",
+  ok: "success", low: "warning", out: "danger", at_risk: "danger", dead: "neutral", excess: "warning",
   Current: "success", "1-30": "neutral", "31-60": "warning", "61-90": "warning", "90+": "danger",
 };
-const STATUS_LABEL: Record<string, string> = { ok: "In stock", low: "Below ROP", out: "Out of stock", CLOSED_SHORT: "Closed short" };
+const STATUS_LABEL: Record<string, string> = { ok: "In stock", low: "Below ROP", out: "Out of stock", at_risk: "At risk", dead: "Slow / dead", excess: "Overstock", CLOSED_SHORT: "Closed short" };
 
 export function StatusBadge({ status }: { status: string }) {
   return <Badge tone={STATUS_TONE[status] ?? "neutral"}>{STATUS_LABEL[status] ?? (status.includes("-") || status.includes("+") || status === "Current" ? status : titleCase(status))}</Badge>;
@@ -91,7 +93,7 @@ export function Kpi({ label, value, sub, icon: Icon, tone, to }: {
       )}
     </>
   );
-  const cls = "block min-w-0 rounded-lg border bg-card p-3 sm:p-4";
+  const cls = "block h-full min-w-0 rounded-lg border bg-card p-3 sm:p-4";
   return to ? (
     <Link to={to} className={cx(cls, "transition-colors duration-150 hover:border-accent/50 hover:bg-muted/40")}>{body}</Link>
   ) : (

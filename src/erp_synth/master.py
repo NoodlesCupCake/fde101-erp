@@ -105,6 +105,11 @@ def generate_master(cfg: Config, rng: random.Random):
     sales_reps = [e for e in employees if e["department_id"] == dept_of["SAL"] and e["manager_id"] is not None]
     hidden["buyers"] = [e["employee_id"] for e in employees if e["department_id"] == dept_of["PUR"]]
     hidden["warehouse_staff"] = [e["employee_id"] for e in employees if e["department_id"] == dept_of["WHS"]]
+    hidden["inventory_controllers"] = [e["employee_id"] for e in employees
+                                       if e["job_title"] == "Inventory Controller"] or hidden["warehouse_staff"]
+    hidden["md"] = next(e["employee_id"] for e in employees if e["department_id"] == dept_of["MGT"] and e["manager_id"] is None)
+    hidden["pur_head"] = next(e["employee_id"] for e in employees if e["department_id"] == dept_of["PUR"] and e["manager_id"] == hidden["md"])
+    hidden["buyers"] = [b for b in hidden["buyers"] if b != hidden["pur_head"]] or hidden["buyers"]
 
     t["warehouses"] = [dict(w) for w in ref.WAREHOUSES]
     t["product_categories"] = [{"category_id": i, "code": c[0], "name": c[1]} for i, c in enumerate(ref.CATEGORIES, 1)]
@@ -184,6 +189,34 @@ def generate_master(cfg: Config, rng: random.Random):
     for i, p in enumerate(prices, 1):
         p["product_price_id"] = i
     t["products"], t["product_prices"] = products, prices
+
+    # ---------------- Procurement master data (own RNG so sales-side data is unchanged) ----------------
+    prng = random.Random(cfg.seed * 7919 + 1)
+    profiles = ref.SUPPLIER_PROFILES
+    hidden["suppliers"] = {}
+    for sup in suppliers:
+        prof = prng.choices(list(profiles), weights=[v["weight"] for v in profiles.values()])[0]
+        hidden["suppliers"][sup["supplier_id"]] = {"profile": prof, **{k: v for k, v in profiles[prof].items() if k != "weight"}}
+    # Supplier price list: preferred (primary) supplier + 1–2 alternates from the same category.
+    # cost_factor = supplier price / standard cost; the simulator keeps it current (RFQ awards change it).
+    supplier_products = []
+    for p in products:
+        code = next(c["code"] for c in t["product_categories"] if c["category_id"] == p["category_id"])
+        pool = [s for s, cs in supplier_cats.items() if code in cs and s != p["primary_supplier_id"]]
+        alternates = prng.sample(pool, k=min(len(pool), prng.choice([1, 1, 2])))
+        moq = 1 if p["standard_cost"] >= 1000 else prng.choice([5, 10]) if p["standard_cost"] >= 100 else prng.choice([10, 20, 50])
+        for sid in [p["primary_supplier_id"], *alternates]:
+            preferred = sid == p["primary_supplier_id"]
+            base_lead = next(s["lead_time_days"] for s in suppliers if s["supplier_id"] == sid)
+            supplier_products.append({
+                "supplier_product_id": len(supplier_products) + 1, "supplier_id": sid, "product_id": p["product_id"],
+                "supplier_sku": f"{next(s['supplier_code'] for s in suppliers if s['supplier_id'] == sid)}-{prng.randint(10000, 99999)}",
+                "cost_factor": prng.uniform(0.98, 1.02) if preferred else prng.uniform(0.94, 1.12),
+                "lead_time_days": max(2, base_lead + prng.randint(-1, 2)),
+                "min_order_qty": moq if preferred else max(1, moq * prng.choice([1, 2])),
+                "is_preferred": int(preferred), "valid_from": iso(min(date.fromisoformat(p["created_date"]), cfg.start)),
+            })
+    t["supplier_products"] = supplier_products
 
     # ---------------- Customers ----------------
     customers, used_names, used_domains = [], set(), set()

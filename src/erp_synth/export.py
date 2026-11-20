@@ -6,10 +6,11 @@ from pathlib import Path
 
 TABLE_ORDER = [
     "company", "departments", "employees", "warehouses", "product_categories", "suppliers", "products",
-    "product_prices", "inventory_policies", "customers", "chart_of_accounts",
+    "product_prices", "supplier_products", "inventory_policies", "customers", "chart_of_accounts",
     "sales_orders", "sales_order_lines", "deliveries", "sales_invoices", "customer_payments",
+    "purchase_requisitions", "purchase_requisition_lines", "rfqs", "rfq_quotes",
     "purchase_orders", "purchase_order_lines", "goods_receipts", "goods_receipt_lines",
-    "supplier_invoices", "supplier_payments", "inventory_transactions", "journal_entries", "journal_lines",
+    "supplier_invoices", "supplier_invoice_lines", "supplier_payments", "inventory_transactions", "journal_entries", "journal_lines",
 ]
 
 

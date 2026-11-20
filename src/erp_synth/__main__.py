@@ -25,6 +25,10 @@ def generate(cfg: Config, out: Path) -> bool:
     write_csv(con, out / "csv")
     write_rows_csv([{"customer_id": k, **v} for k, v in hidden["customers"].items()], out / "ground_truth" / "customer_behaviour.csv")
     write_rows_csv([{"product_id": k, **v} for k, v in hidden["products"].items()], out / "ground_truth" / "product_demand.csv")
+    write_rows_csv([{"supplier_id": k, "profile": v["profile"], "on_time_prob": v["on_time"],
+                     "late_days_min": v["late_days"][0], "late_days_max": v["late_days"][1], "short_ship_prob": v["short"],
+                     "reject_prob": v["reject"], "price_error_prob": v["price_err"], "qty_error_prob": v["qty_err"]}
+                    for k, v in hidden["suppliers"].items()], out / "ground_truth" / "supplier_reliability.csv")
     print(f"Generated {cfg.start} → {cfg.end} (seed={cfg.seed}) into {out}/ in {time.time() - t0:.1f}s")
     print_summary(con)
     ok = run_checks(con)

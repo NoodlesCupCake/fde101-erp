@@ -21,7 +21,7 @@ class Config:
     backorder_cancel_days: int = 30
 
     # Inventory policy
-    safety_days: int = 7
+    safety_days: int = 10
     review_period_days: int = 7  # each supplier is ordered from on one fixed weekday
     order_cover_days: int = 21
 

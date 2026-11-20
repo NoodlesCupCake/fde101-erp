@@ -94,9 +94,9 @@ SELECT ip.product_id, ip.warehouse_id, ip.reorder_point, ip.reorder_qty,
 FROM inventory_policies ip
 LEFT JOIN (SELECT product_id, warehouse_id, SUM(quantity) AS on_hand, SUM(total_cost) AS value
            FROM inventory_transactions GROUP BY 1, 2) s USING (product_id, warehouse_id)
-LEFT JOIN (SELECT l.product_id, po.warehouse_id, SUM(l.quantity) AS on_order
+LEFT JOIN (SELECT l.product_id, po.warehouse_id, SUM(l.quantity - l.received_quantity) AS on_order
            FROM purchase_order_lines l JOIN purchase_orders po USING (purchase_order_id)
-           WHERE po.status = 'OPEN' GROUP BY 1, 2) o USING (product_id, warehouse_id)
+           WHERE po.status IN ('OPEN', 'PARTIALLY_RECEIVED') GROUP BY 1, 2) o USING (product_id, warehouse_id)
 """
 
 
@@ -151,7 +151,7 @@ def dashboard(con=DB):
                               SUM(CASE WHEN on_hand > 0 AND on_hand < reorder_point THEN 1 ELSE 0 END) AS below_rop
                        FROM ({STOCK}) s JOIN products p USING (product_id) WHERE p.is_active = 1""")
     so = one(con, "SELECT COUNT(*) AS n, COALESCE(SUM(total_amount),0) AS value FROM sales_orders WHERE status = 'OPEN'")
-    po = one(con, "SELECT COUNT(*) AS n, COALESCE(SUM(total_amount),0) AS value FROM purchase_orders WHERE status = 'OPEN'")
+    po = one(con, "SELECT COUNT(*) AS n, COALESCE(SUM(total_amount),0) AS value FROM purchase_orders WHERE status IN ('OPEN', 'PARTIALLY_RECEIVED')")
     last90 = one(con, "SELECT SUM(total_amount) AS v FROM sales_invoices WHERE invoice_date > date(:as_of, '-90 day')", ytd)["v"] or 1
     monthly = rows(con, """
         SELECT substr(je.entry_date, 1, 7) AS month,
@@ -341,6 +341,238 @@ def inventory(q: str | None = None, warehouse_id: int | None = None, category_id
     return result
 
 
+# ---------------------------------------------------------------- stock dashboard
+# Definitions (shown in the UI):
+#   days of cover   = on hand ÷ average daily units shipped over the last 90 days
+#   turns / year    = cost of goods shipped in the last 12 months ÷ current stock value
+#   ABC class       = products ranked by 12-month cost of goods shipped: A = first 80%, B = next 15%, C = rest
+#   fill rate       = sales-order lines shipped from stock within 2 days of the order (orders of the last 90 days)
+#   status          = out | at_risk (cover < supplier lead time) | low (below reorder point) | dead (no sale in 90 days)
+#                     | excess (cover > 120 days) | ok
+COVER_LOW, COVER_HIGH, EXCESS_DAYS = 14, 60, 120
+
+
+def _health_params(warehouse_id, category_id, abc):
+    ao = as_of()
+    p = {"as_of": ao, "d90": _shift(ao, -90), "d365": _shift(ao, -365)}
+    where = ["1=1"]
+    if warehouse_id:
+        where.append("i.warehouse_id = :wid"); p["wid"] = warehouse_id
+    if category_id:
+        where.append("i.category_id = :cid"); p["cid"] = category_id
+    if abc:
+        where.append("i.abc = :abc"); p["abc"] = abc
+    return p, " AND ".join(where)
+
+
+def _shift(iso_date: str, days: int) -> str:
+    from datetime import date, timedelta
+    return (date.fromisoformat(iso_date) + timedelta(days=days)).isoformat()
+
+
+ITEMS = f"""
+WITH agg AS (SELECT product_id, warehouse_id, SUM(quantity) AS on_hand, SUM(total_cost) AS value,
+                    -SUM(CASE WHEN txn_type = 'SHIPMENT' AND txn_date > :d90 THEN quantity ELSE 0 END) AS units90,
+                    -SUM(CASE WHEN txn_type = 'SHIPMENT' AND txn_date > :d365 THEN total_cost ELSE 0 END) AS cogs365,
+                    MAX(CASE WHEN txn_type = 'SHIPMENT' THEN txn_date END) AS last_sale
+             FROM inventory_transactions GROUP BY 1, 2),
+cogs12 AS (SELECT product_id, SUM(cogs365) AS v FROM agg GROUP BY 1),
+ranked AS (SELECT p.product_id, COALESCE(c.v, 0) AS v,
+                  SUM(COALESCE(c.v, 0)) OVER (ORDER BY COALESCE(c.v, 0) DESC, p.product_id ROWS UNBOUNDED PRECEDING) AS cum,
+                  SUM(COALESCE(c.v, 0)) OVER () AS tot
+           FROM products p LEFT JOIN cogs12 c USING (product_id)),
+abc AS (SELECT product_id, CASE WHEN v = 0 THEN 'C' WHEN cum - v < 0.80 * tot THEN 'A'
+                                WHEN cum - v < 0.95 * tot THEN 'B' ELSE 'C' END AS cls FROM ranked),
+incoming AS (SELECT l.product_id, po.warehouse_id, SUM(l.quantity - l.received_quantity) AS qty, MIN(po.expected_date) AS next_date
+             FROM purchase_order_lines l JOIN purchase_orders po USING (purchase_order_id)
+             WHERE po.status IN ('OPEN', 'PARTIALLY_RECEIVED') GROUP BY 1, 2),
+pending AS (SELECT rl.product_id, r.warehouse_id, SUM(rl.quantity) AS qty FROM purchase_requisition_lines rl
+            JOIN purchase_requisitions r USING (requisition_id) WHERE r.status = 'PENDING_APPROVAL' GROUP BY 1, 2),
+ontime AS (SELECT po.supplier_id, AVG(g.receipt_date <= po.expected_date) AS rate FROM goods_receipts g
+           JOIN purchase_orders po USING (purchase_order_id) WHERE g.delivery_no = 1 GROUP BY 1),
+base AS (
+  SELECT ip.product_id, ip.warehouse_id, p.sku, p.name, p.uom, p.category_id, pc.name AS category, w.code AS warehouse,
+         a.cls AS abc, p.is_active, COALESCE(s.on_hand, 0) AS on_hand, ROUND(COALESCE(s.value, 0), 2) AS value,
+         ip.reorder_point, ROUND(COALESCE(s.units90, 0) / 90.0, 2) AS per_day,
+         CASE WHEN COALESCE(s.units90, 0) > 0 THEN ROUND(COALESCE(s.on_hand, 0) / (s.units90 / 90.0), 1) END AS cover_days,
+         sp.lead_time_days AS lead_time, sup.name AS supplier, ROUND(ot.rate * 100, 1) AS supplier_on_time,
+         COALESCE(inc.qty, 0) AS incoming, inc.next_date AS next_expected, COALESCE(pd.qty, 0) AS pending_req, s.last_sale,
+         ROUND(COALESCE(s.cogs365, 0), 2) AS cogs365
+  FROM inventory_policies ip
+  JOIN products p USING (product_id) JOIN product_categories pc USING (category_id)
+  JOIN warehouses w ON w.warehouse_id = ip.warehouse_id
+  JOIN abc a ON a.product_id = ip.product_id
+  JOIN supplier_products sp ON sp.product_id = ip.product_id AND sp.is_preferred = 1
+  JOIN suppliers sup ON sup.supplier_id = sp.supplier_id
+  LEFT JOIN agg s ON s.product_id = ip.product_id AND s.warehouse_id = ip.warehouse_id
+  LEFT JOIN incoming inc ON inc.product_id = ip.product_id AND inc.warehouse_id = ip.warehouse_id
+  LEFT JOIN pending pd ON pd.product_id = ip.product_id AND pd.warehouse_id = ip.warehouse_id
+  LEFT JOIN ontime ot ON ot.supplier_id = sp.supplier_id
+  WHERE p.is_active = 1 OR COALESCE(s.on_hand, 0) > 0          -- discontinued items still holding stock count as dead stock
+),
+items AS (
+  SELECT *,
+    CASE WHEN on_hand <= 0 THEN 'out'
+         WHEN is_active = 0 THEN 'dead'
+         WHEN cover_days IS NOT NULL AND cover_days < lead_time THEN 'at_risk'
+         WHEN on_hand < reorder_point THEN 'low'
+         WHEN last_sale IS NULL OR last_sale <= :d90 THEN 'dead'
+         WHEN cover_days > {EXCESS_DAYS} THEN 'excess'
+         ELSE 'ok' END AS status,
+    CASE WHEN on_hand <= 0 OR (cover_days IS NOT NULL AND cover_days < {COVER_LOW}) THEN 'low'
+         WHEN cover_days IS NULL OR cover_days > {COVER_HIGH} THEN 'high' ELSE 'ok' END AS cover_band,
+    CASE WHEN cover_days IS NOT NULL THEN ROUND(cover_days - lead_time, 1) END AS cover_gap
+  FROM base
+)
+"""
+
+
+def _db_version() -> float:
+    return DB_PATH.stat().st_mtime
+
+
+@lru_cache(maxsize=64)
+def _health_items(version: float, warehouse_id, category_id, abc) -> tuple:
+    """Item-location health rows for a filter combination; cached until the database file changes."""
+    p, where = _health_params(warehouse_id, category_id, abc)
+    con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    try:
+        return tuple(dict(r) for r in con.execute(f"{ITEMS} SELECT * FROM items i WHERE {where}", p))
+    finally:
+        con.close()
+
+
+@lru_cache(maxsize=64)
+def _stock_dashboard(version: float, warehouse_id, category_id, abc) -> dict:
+    p, _ = _health_params(warehouse_id, category_id, abc)
+    ao = p["as_of"]
+    items = _health_items(version, warehouse_id, category_id, abc)
+    con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    try:
+        filtered = warehouse_id or category_id or abc
+        if filtered:  # restrict transaction queries to the selected item-locations
+            con.execute("CREATE TEMP TABLE sel_keys (product_id INT, warehouse_id INT, PRIMARY KEY (product_id, warehouse_id)) WITHOUT ROWID")
+            con.executemany("INSERT INTO sel_keys VALUES (?, ?)", sorted({(r["product_id"], r["warehouse_id"]) for r in items}))
+            tx = "inventory_transactions t JOIN sel_keys k ON k.product_id = t.product_id AND k.warehouse_id = t.warehouse_id"
+            sol = "JOIN sel_keys k ON k.product_id = l.product_id AND k.warehouse_id = so.warehouse_id"
+        else:
+            tx, sol = "inventory_transactions t", ""
+        prev_month_end = _shift(ao[:8] + "01", -1)
+        sc = one(con, f"""SELECT COALESCE(SUM(CASE WHEN t.txn_date <= :pme THEN t.total_cost END), 0) AS prev_value,
+                                 COALESCE(-SUM(CASE WHEN t.txn_type = 'SHIPMENT' AND t.txn_date > :d90 THEN t.total_cost END), 0) AS cogs90,
+                                 COALESCE(-SUM(CASE WHEN t.txn_type = 'ADJUSTMENT' AND t.txn_date > :d365 THEN t.total_cost END), 0) AS shrink365
+                          FROM {tx}""", {**p, "pme": prev_month_end})
+        # Monthly net movement per warehouse → cumulative month-end value; plus receipts / shipments / adjustments
+        net = rows(con, f"""SELECT substr(t.txn_date, 1, 7) AS month, w.code, ROUND(SUM(t.total_cost), 2) AS net,
+                                   SUM(CASE WHEN t.txn_type = 'RECEIPT' THEN t.total_cost ELSE 0 END) AS receipts,
+                                   -SUM(CASE WHEN t.txn_type = 'SHIPMENT' THEN t.total_cost ELSE 0 END) AS shipments,
+                                   SUM(CASE WHEN t.txn_type = 'ADJUSTMENT' THEN t.total_cost ELSE 0 END) AS adjustments
+                            FROM {tx} JOIN warehouses w ON w.warehouse_id = t.warehouse_id GROUP BY 1, 2 ORDER BY 1""")
+        fill = rows(con, f"""SELECT so.warehouse_id, COUNT(*) AS lines,
+                                    SUM(d.ship_date IS NOT NULL AND julianday(d.ship_date) - julianday(so.order_date) <= 2) AS ok
+                             FROM sales_order_lines l JOIN sales_orders so USING (sales_order_id) {sol}
+                             LEFT JOIN deliveries d USING (sales_order_id)
+                             WHERE so.order_date > :d90 AND so.order_date <= :cut AND COALESCE(so.cancel_reason, '') <> 'Customer request'
+                             GROUP BY 1""", {"d90": p["d90"], "cut": _shift(ao, -2)})
+        shrinkage_top = rows(con, f"""SELECT p.product_id, p.sku, p.name, w.code AS warehouse, -SUM(t.quantity) AS units, ROUND(-SUM(t.total_cost), 2) AS value
+                                      FROM {tx} JOIN products p ON p.product_id = t.product_id JOIN warehouses w ON w.warehouse_id = t.warehouse_id
+                                      WHERE t.txn_type = 'ADJUSTMENT' AND t.txn_date > :d GROUP BY 1, 4 HAVING value > 0
+                                      ORDER BY value DESC LIMIT 6""", {"d": p["d365"]})
+        codes = {w["warehouse_id"]: w["code"] for w in rows(con, "SELECT warehouse_id, code FROM warehouses")}
+    finally:
+        con.close()
+
+    value = round(sum(r["value"] for r in items), 2)
+    trend, movements, running = [], [], {}
+    months = sorted({r["month"] for r in net})
+    for i, month in enumerate(months):
+        mrows = [r for r in net if r["month"] == month]
+        for r in mrows:
+            running[r["code"]] = round(running.get(r["code"], 0) + r["net"], 2)
+        if i == 0 and len(months) > 1 and not any(r["shipments"] or r["receipts"] for r in mrows):
+            continue  # opening-balance month (only OPENING rows): carried into the first trading month
+        trend.append({"month": month, **running, "total": round(sum(running.values()), 2),
+                      "cogs": round(sum(r["shipments"] for r in mrows), 2)})
+        movements.append({"month": month, "receipts": round(sum(r["receipts"] for r in mrows), 2),
+                          "shipments": round(sum(r["shipments"] for r in mrows), 2),
+                          "adjustments": round(sum(r["adjustments"] for r in mrows), 2)})
+    fill_ok, fill_lines = sum(f["ok"] or 0 for f in fill), sum(f["lines"] for f in fill)
+
+    by_status: dict = {}
+    for r in items:
+        b = by_status.setdefault(r["status"], {"items": 0, "value": 0.0})
+        b["items"] += 1
+        b["value"] += r["value"]
+    st = lambda k, f="items": round(by_status.get(k, {}).get(f, 0), 2)
+
+    warehouses = []
+    for wid, code in sorted(codes.items()):
+        wi = [r for r in items if r["warehouse_id"] == wid]
+        if not wi:
+            continue
+        wv = sum(r["value"] for r in wi)
+        wf = next((f for f in fill if f["warehouse_id"] == wid), None)
+        warehouses.append({"warehouse_id": wid, "code": code, "items": len(wi), "value": round(wv, 2),
+                           "turns": round(sum(r["cogs365"] for r in wi) / wv, 1) if wv else None,
+                           "fill_rate": round((wf["ok"] or 0) / wf["lines"] * 100, 1) if wf and wf["lines"] else None,
+                           "out": sum(r["status"] == "out" for r in wi), "at_risk": sum(r["status"] == "at_risk" for r in wi),
+                           "low": sum(r["status"] == "low" for r in wi),
+                           "dead_value": round(sum(r["value"] for r in wi if r["status"] == "dead"), 2)})
+    grid = [{"abc": a, "cover": band, "items": len(cell), "value": round(sum(r["value"] for r in cell), 2)}
+            for a in "ABC" for band in ("low", "ok", "high")
+            for cell in [[r for r in items if r["abc"] == a and r["cover_band"] == band]]]
+    return {
+        "as_of": ao,
+        "definitions": {"cover_low": COVER_LOW, "cover_high": COVER_HIGH, "excess_days": EXCESS_DAYS},
+        "kpis": {
+            "stock_value": value, "prev_month_value": round(sc["prev_value"], 2), "prev_month_end": prev_month_end,
+            "days_of_cover": round(value / (sc["cogs90"] / 90), 1) if sc["cogs90"] else None,
+            "turns": round(sum(r["cogs365"] for r in items) / value, 1) if value else None,
+            "fill_rate": round(fill_ok / fill_lines * 100, 1) if fill_lines else None,
+            "items": len(items), "out": st("out"), "at_risk": st("at_risk"), "low": st("low"),
+            "dead_items": st("dead"), "dead_value": st("dead", "value"),
+            "excess_items": st("excess"), "excess_value": st("excess", "value"),
+            "shrinkage_12m": round(sc["shrink365"], 2),
+        },
+        "status_counts": {k: {"items": v["items"], "value": round(v["value"], 2)} for k, v in by_status.items()},
+        "trend": trend, "movements": movements, "warehouses": warehouses, "abc_grid": grid, "shrinkage_top": shrinkage_top,
+    }
+
+
+@api.get("/inventory/dashboard")
+def stock_dashboard(warehouse_id: int | None = None, category_id: int | None = None,
+                    abc: str | None = Query(None, pattern="^[ABC]$")):
+    return _stock_dashboard(_db_version(), warehouse_id, category_id, abc)
+
+
+ITEM_SORTS = {"urgency", "value", "cover_days", "on_hand", "sku", "last_sale", "cover_gap", "abc", "warehouse"}
+
+
+@api.get("/inventory/items")
+def stock_items(view: str = Query("risk", pattern="^(risk|excess|all)$"), warehouse_id: int | None = None,
+                category_id: int | None = None, abc: str | None = Query(None, pattern="^[ABC]$"),
+                cover: str | None = Query(None, pattern="^(low|ok|high)$"), q: str | None = None,
+                sort: str | None = None, dir: str | None = None, page: int = PageQ, page_size: int = SizeQ):
+    items = _health_items(_db_version(), warehouse_id, category_id, abc)
+    keep = {"risk": {"out", "at_risk", "low"}, "excess": {"dead", "excess"}, "all": None}[view]
+    ql = q.lower() if q else None
+    sel = [dict(r, id=f"{r['product_id']}-{r['warehouse_id']}",
+                urgency=-1000 if r["status"] == "out" else (r["cover_gap"] if r["cover_gap"] is not None else 999))
+           for r in items
+           if (keep is None or r["status"] in keep) and (not cover or r["cover_band"] == cover)
+           and (not ql or ql in r["sku"].lower() or ql in r["name"].lower())]
+    # default ordering: most urgent first for risk, most money tied up first for the others
+    sort = sort if sort in ITEM_SORTS else ("urgency" if view == "risk" else "value")
+    dir = dir or ("asc" if sort == "urgency" else "desc")
+    sel.sort(key=lambda r: (r[sort] is None, r[sort] if r[sort] is not None else 0), reverse=(dir == "desc"))
+    if dir == "desc":  # keep NULLs last when descending too
+        sel = [r for r in sel if r[sort] is not None] + [r for r in sel if r[sort] is None]
+    start = (page - 1) * page_size
+    return {"items": sel[start:start + page_size], "total": len(sel), "page": page, "page_size": page_size}
+
+
 @api.get("/products/{product_id}")
 def product(product_id: int, con=DB):
     pr = one(con, """SELECT p.*, pc.name AS category, s.name AS supplier_name, s.lead_time_days
@@ -374,11 +606,13 @@ def purchase_orders(q: str | None = None, status: str | None = None, supplier_id
     if warehouse_id:
         where.append("po.warehouse_id = :wid"); p["wid"] = warehouse_id
     base = f"""SELECT po.purchase_order_id, po.po_number, po.order_date, po.expected_date, po.status, s.name AS supplier_name,
-                      w.code AS warehouse, po.total_amount, g.receipt_date,
+                      w.code AS warehouse, po.total_amount, g.receipt_date, g.deliveries,
                       (SELECT COUNT(*) FROM purchase_order_lines l WHERE l.purchase_order_id = po.purchase_order_id) AS line_count,
-                      CASE WHEN g.receipt_date IS NOT NULL THEN CAST(julianday(g.receipt_date) - julianday(po.expected_date) AS INTEGER) END AS days_late
+                      CASE WHEN g.receipt_date IS NOT NULL THEN CAST(julianday(g.receipt_date) - julianday(po.expected_date) AS INTEGER) END AS days_late,
+                      (SELECT COUNT(*) FROM supplier_invoices si WHERE si.purchase_order_id = po.purchase_order_id AND si.status = 'ON_HOLD') AS invoices_on_hold
                FROM purchase_orders po JOIN suppliers s USING (supplier_id) JOIN warehouses w ON w.warehouse_id = po.warehouse_id
-               LEFT JOIN goods_receipts g USING (purchase_order_id)
+               LEFT JOIN (SELECT purchase_order_id, MIN(receipt_date) AS receipt_date, COUNT(*) AS deliveries
+                          FROM goods_receipts GROUP BY 1) g USING (purchase_order_id)
                WHERE {' AND '.join(where)}"""
     return paginate(con, base, p, sort, dir, {"order_date", "po_number", "supplier_name", "total_amount", "expected_date", "status"},
                     "order_date", page, page_size)
@@ -396,13 +630,27 @@ def purchase_order(purchase_order_id: int, con=DB):
     p = {"id": purchase_order_id}
     po["lines"] = rows(con, """SELECT l.*, pr.sku, pr.name AS product_name, pr.uom FROM purchase_order_lines l
                                JOIN products pr USING (product_id) WHERE purchase_order_id = :id ORDER BY line_no""", p)
-    po["goods_receipt"] = one(con, """SELECT g.*, e.first_name || ' ' || e.last_name AS received_by_name FROM goods_receipts g
-                                      JOIN employees e ON e.employee_id = g.received_by WHERE purchase_order_id = :id""", p)
-    po["supplier_invoice"] = one(con, "SELECT * FROM supplier_invoices WHERE purchase_order_id = :id", p)
-    po["payments"] = rows(con, "SELECT * FROM supplier_payments WHERE supplier_invoice_id = :sid",
-                          {"sid": po["supplier_invoice"]["supplier_invoice_id"]}) if po["supplier_invoice"] else []
-    refs = [("GOODS_RECEIPT", po["goods_receipt"] and po["goods_receipt"]["goods_receipt_id"]),
-            ("SUPPLIER_INVOICE", po["supplier_invoice"] and po["supplier_invoice"]["supplier_invoice_id"])]
+    po["requisition"] = one(con, """SELECT r.*, rq.first_name || ' ' || rq.last_name AS requested_by_name,
+                                          ap.first_name || ' ' || ap.last_name AS approver_name, ap.job_title AS approver_title
+                                   FROM purchase_requisitions r JOIN employees rq ON rq.employee_id = r.requested_by
+                                   LEFT JOIN employees ap ON ap.employee_id = r.approver_id
+                                   WHERE r.requisition_id = :rid""", {"rid": po["requisition_id"]})
+    po["goods_receipts"] = rows(con, """SELECT g.*, e.first_name || ' ' || e.last_name AS received_by_name FROM goods_receipts g
+                                        JOIN employees e ON e.employee_id = g.received_by WHERE purchase_order_id = :id ORDER BY delivery_no""", p)
+    for g in po["goods_receipts"]:
+        g["lines"] = rows(con, """SELECT gl.*, pr.sku, pr.name AS product_name FROM goods_receipt_lines gl JOIN products pr USING (product_id)
+                                  WHERE goods_receipt_id = :g ORDER BY gr_line_id""", {"g": g["goods_receipt_id"]})
+    po["supplier_invoices"] = rows(con, """SELECT si.*, e.first_name || ' ' || e.last_name AS approved_by_name FROM supplier_invoices si
+                                           LEFT JOIN employees e ON e.employee_id = si.approved_by
+                                           WHERE purchase_order_id = :id ORDER BY invoice_date, supplier_invoice_id""", p)
+    for si in po["supplier_invoices"]:
+        si["lines"] = rows(con, """SELECT sl.*, pr.sku, pr.name AS product_name FROM supplier_invoice_lines sl JOIN products pr USING (product_id)
+                                   WHERE supplier_invoice_id = :s ORDER BY line_no""", {"s": si["supplier_invoice_id"]})
+        si["payments"] = rows(con, "SELECT * FROM supplier_payments WHERE supplier_invoice_id = :s ORDER BY payment_date",
+                              {"s": si["supplier_invoice_id"]})
+    po["payments"] = [x for si in po["supplier_invoices"] for x in si["payments"]]
+    refs = [("GOODS_RECEIPT", g["goods_receipt_id"]) for g in po["goods_receipts"]]
+    refs += [("SUPPLIER_INVOICE", si["supplier_invoice_id"]) for si in po["supplier_invoices"]]
     refs += [("SUPPLIER_PAYMENT", x["supplier_payment_id"]) for x in po["payments"]]
     po["journal_entries"] = journal_for(con, refs)
     return po

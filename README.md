@@ -112,8 +112,9 @@ figures are meaningful. The API is **read-only** for now, and every data endpoin
 | Sales Orders | Filterable list → detail with document flow (order → delivery → invoice → payment), lines, GL postings |
 | Customers | List with YTD revenue / open AR → detail with payment behaviour, credit utilisation, open invoices |
 | Receivables | Ageing buckets (click to filter) and open invoices by days overdue |
-| Inventory | Stock by item × warehouse vs. reorder point → product detail with price history and stock movements |
-| Purchasing | PO list → detail with receipt vs ordered, supplier invoice, payment, GL postings |
+| Inventory: Dashboard | Stock value trend by warehouse, days of cover, turns, fill rate, warehouse comparison, ABC × cover heatmap (click to drill in), items needing attention (cover vs supplier lead time, incoming stock), slow/dead and overstock, movements, top shrinkage |
+| Inventory: Stock list | Stock by item × warehouse vs. reorder point → product detail with price history and stock movements |
+| Purchasing | PO list → detail with requisition & approval, each delivery (rejections), three-way match per invoice (hold reasons, variances), payment, GL postings |
 | Accounting | Trial balance, monthly income statement (THB '000), account ledger with running balance |
 
 Stack: React 19, TypeScript, Vite, Tailwind CSS v4, React Router, TanStack Query, Recharts, Lucide icons.
@@ -127,9 +128,10 @@ Light and dark modes follow the OS.
 | Area | Tables (rows ≈) |
 |---|---|
 | Org | `company`, `departments` (7), `employees` (61) |
-| Master | `warehouses` (3), `product_categories` (7), `products` (220), `product_prices` (price/cost history), `inventory_policies` (660 item×warehouse), `customers` (400), `suppliers` (28), `chart_of_accounts` (16) |
+| Master | `warehouses` (3), `product_categories` (7), `products` (220), `product_prices` (price/cost history), `inventory_policies` (660 item×warehouse), `customers` (400), `suppliers` (28), `chart_of_accounts` (17) |
 | Order-to-cash | `sales_orders` (14k), `sales_order_lines` (58k), `deliveries`, `sales_invoices`, `customer_payments` |
-| Procure-to-pay | `purchase_orders` (5.6k), `purchase_order_lines`, `goods_receipts`, `goods_receipt_lines`, `supplier_invoices`, `supplier_payments` |
+| Sourcing | `supplier_products` (539: 2–4 suppliers per product with price, lead time, MOQ, preferred flag), `rfqs` (250), `rfq_quotes` (598) |
+| Procure-to-pay | `purchase_requisitions` (3.9k) + lines, `purchase_orders` (3.9k), `purchase_order_lines`, `goods_receipts` (4.3k, with split deliveries), `goods_receipt_lines` (with rejections), `supplier_invoices` (4.2k, with three-way match), `supplier_invoice_lines`, `supplier_payments` |
 | Inventory | `inventory_transactions` (65k — OPENING / RECEIPT / SHIPMENT / ADJUSTMENT, signed qty & cost) |
 | GL | `journal_entries` (57k), `journal_lines` (134k) |
 
@@ -142,9 +144,35 @@ Headline P&L: about 170M THB revenue in 2025, about 27% gross margin, 6–11% EB
 Sales order ──(stock available at customer's warehouse)──▶ Delivery ─▶ Sales invoice ─▶ Customer payment(s)
      │  not available → backorder; cancelled after 30 days                                (behaviour-driven delay)
      ▼
-Stock position (on hand + on order − backlog) < reorder point
-     ──(supplier's weekly review day)──▶ Purchase order ─▶ Goods receipt (8% short-shipped) ─▶ Supplier invoice ─▶ Payment
+Stock position (on hand + on order + on requisition − backlog) < reorder point
+  ──(preferred supplier's weekly review day, other low items topped up)──▶ Purchase requisition
+  ──(approval by amount)──▶ Purchase order ──▶ Goods receipt(s) ──▶ Supplier invoice ──(three-way match)──▶ Payment
+       out of stock with nothing on order → EMERGENCY requisition to the fastest supplier, approved same day
 ```
+
+### Procurement in detail (for procurement demos)
+
+| Stage | What the data contains |
+|---|---|
+| **Supplier price list** | Every product has a preferred supplier plus 1–3 alternates (`supplier_products`): own price, lead time and minimum order quantity |
+| **Sourcing (RFQs)** | About 2–3 RFQs a week invite the current suppliers, sometimes a newcomer. Quotes are scored on price × lead time × each supplier's *actual* on-time history. The winner becomes the preferred supplier at the quoted price, which changed the preferred supplier for 100+ products |
+| **Requisitions & approvals** | Each PO starts as a requisition. Under ฿50k → auto-approved. ฿50k–300k → Purchasing Manager (1–3 days). Over ฿300k → Managing Director (2–6 days). About 1.5% are rejected with a reason. At the end date some requisitions are still pending approval |
+| **Purchase orders** | About 2.2 lines per PO (low items from the same supplier and warehouse are consolidated). Prices come from the supplier price list. Status: `OPEN`, `PARTIALLY_RECEIVED`, `RECEIVED` or `CLOSED_SHORT` |
+| **Receiving** | 12% of POs arrive in 2 deliveries. Short shipments and dock rejections (damaged or wrong goods, with reasons) follow the supplier's profile. Only accepted units enter stock |
+| **Three-way match** | Each delivery is invoiced separately and matched: billed qty × price vs accepted qty × PO price. Suppliers sometimes bill rejected units, over-bill quantity, or charge above the PO price. Within tolerance (≤1% price, ≤฿1,000) → auto-approved. Otherwise → `ON_HOLD` for 3–20 days, then the supplier corrects it or the buyer accepts the variance (posted to **5200 Purchase Price Variance**) |
+| **Payables** | AP is posted only when an invoice is approved, so on-hold invoices sit in GRNI (2150) until resolved. Payment follows each supplier's terms |
+
+**Supplier reliability (hidden profile → visible outcomes):**
+
+| Profile | Suppliers | On-time first delivery | POs closed short | Invoices with exceptions |
+|---|---|---|---|---|
+| reliable | 14 | ~95% | ~5% | ~8% |
+| average | 11 | ~84% | ~14% | ~16% |
+| unreliable | 3 | ~58% | ~28% | ~32% |
+
+Overall on-time delivery is about 88%. The profiles are in `data/ground_truth/supplier_reliability.csv`, so a
+supplier-scorecard or risk model can be checked against the truth. Procurement uses its own random stream,
+so changing procurement settings never changes customer demand.
 
 Realism built in:
 - **Demand:** 12% yearly growth; Thai seasonality (April Songkran dip, rainy-season slowdown, dry-season peak); half-day Saturdays; closed on Sundays and public holidays; Pareto-distributed customer volumes; new customers acquired and others churned during the period.
@@ -163,7 +191,7 @@ Realism built in:
 | Sales invoice | 1100 AR | 4000 Revenue, 2100 Output VAT |
 | Customer payment | 1000 Cash | 1100 AR |
 | Goods receipt | 1200 Inventory | 2150 GRNI |
-| Supplier invoice | 2150 GRNI, 1150 Input VAT | 2000 AP |
+| Supplier invoice (at approval) | 2150 GRNI (receipt value), 1150 Input VAT, 5200 PPV (if accepted variance) | 2000 AP |
 | Supplier payment | 2000 AP | 1000 Cash |
 | Cycle count | 5100 Shrinkage / 1200 | 1200 / 5100 |
 | Payroll, rent, utilities (month end) | 6000/6010/6100/6200 | 1000 Cash |
@@ -176,20 +204,25 @@ Realism built in:
 These checks run on every `generate`: foreign keys; every journal entry balances; the trial balance nets to
 zero; order and PO headers equal the sum of their lines; each invoiced order has exactly one delivery and one
 invoice; document dates are in sequence; no invoice is overpaid; stock is never negative; and the inventory,
-AR and AP sub-ledgers each equal their GL control account.
+AR and AP sub-ledgers each equal their GL control account. Procurement checks: GRNI equals goods received but
+not yet invoiced and approved; approved invoice = receipt value + variance; received ≤ ordered; every PO traces
+to an approved requisition at the right approval level; on-hold invoices are never posted or paid; and each
+product has exactly one preferred supplier.
 
 ## Ground truth (not part of the ERP)
 
 `data/ground_truth/` (generated, not committed) holds the hidden drivers of the simulation, as labels for analytics and ML work:
 - `customer_behaviour.csv`: volume weight, payment behaviour, default start date, churn date
 - `product_demand.csv`: popularity and quantity factor
+- `supplier_reliability.csv`: profile, on-time probability, delay range, short-ship, rejection and invoice-error rates
 
 Use them to test credit-risk, churn or demand-forecast models against the true answer.
 
 ## Known simplifications
 
 - One delivery and one invoice per order (no partial shipments).
-- One goods receipt and one supplier invoice per PO (short receipts close the PO).
+- At most 2 deliveries per PO and one supplier invoice per delivery. Short receipts and rejections close the shortfall (no back-orders to suppliers). Rejected units are not tracked as separate return-to-vendor documents.
+- RFQs are for one product at a time; there are no long-term contracts or volume discounts.
 - No opening AR/AP, fixed assets or tax withholding.
 - No credit-limit enforcement or returns/credit notes.
 - All amounts are in THB.
@@ -206,6 +239,7 @@ src/erp_synth/
   export.py      # SQLite + CSV writers
   validate.py    # integrity checks + summary metrics
 src/erp_api/app.py   # read-only FastAPI JSON API (+ serves web/dist when built)
+                     # stock dashboard: GET /api/inventory/dashboard, /api/inventory/items (cached per filter)
 src/erp_api/auth.py  # local auth: scrypt passwords, cookie sessions (data/auth.sqlite)
 src/erp_api/users.py # account admin CLI
 web/                 # React frontend (pages/, components/, lib/)

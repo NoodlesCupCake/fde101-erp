@@ -1,6 +1,8 @@
 """Integrity checks + headline metrics over the generated SQLite database."""
 import sqlite3
 
+from . import reference as ref
+
 CHECKS = [
     ("Foreign keys valid",
      "SELECT COUNT(*) FROM pragma_foreign_key_check"),
@@ -35,9 +37,38 @@ CHECKS = [
     ("AR sub-ledger = GL 1100",
      """SELECT CASE WHEN ABS((SELECT SUM(total_amount) FROM sales_invoices) - (SELECT SUM(amount) FROM customer_payments)
               - (SELECT SUM(debit-credit) FROM journal_lines WHERE account_code='1100')) > 0.05 THEN 1 ELSE 0 END"""),
-    ("AP sub-ledger = GL 2000",
-     """SELECT CASE WHEN ABS((SELECT SUM(total_amount) FROM supplier_invoices) - (SELECT COALESCE(SUM(amount),0) FROM supplier_payments)
+    ("AP sub-ledger = GL 2000 (approved invoices − payments)",
+     """SELECT CASE WHEN ABS((SELECT COALESCE(SUM(total_amount),0) FROM supplier_invoices WHERE approved_date IS NOT NULL)
+              - (SELECT COALESCE(SUM(amount),0) FROM supplier_payments)
               - (SELECT SUM(credit-debit) FROM journal_lines WHERE account_code='2000')) > 0.05 THEN 1 ELSE 0 END"""),
+    ("GRNI (GL 2150) = goods received not yet invoiced & approved",
+     """SELECT CASE WHEN ABS((SELECT COALESCE(SUM(t.total_cost),0) FROM inventory_transactions t WHERE t.txn_type='RECEIPT')
+              - (SELECT COALESCE(SUM(receipt_value),0) FROM supplier_invoices WHERE approved_date IS NOT NULL)
+              - (SELECT SUM(credit-debit) FROM journal_lines WHERE account_code='2150')) > 0.05 THEN 1 ELSE 0 END"""),
+    ("Approved invoice = receipt value + price variance",
+     """SELECT COUNT(*) FROM supplier_invoices WHERE approved_date IS NOT NULL
+        AND (ABS(subtotal - receipt_value - price_variance) > 0.01 OR ABS(total_amount - subtotal - vat_amount) > 0.01)"""),
+    ("Received ≤ ordered and delivered = accepted + rejected",
+     """SELECT (SELECT COUNT(*) FROM purchase_order_lines WHERE received_quantity > quantity)
+             + (SELECT COUNT(*) FROM goods_receipt_lines WHERE quantity_received <> quantity_accepted + quantity_rejected)
+             + (SELECT COUNT(*) FROM purchase_order_lines l JOIN (SELECT po_line_id, SUM(quantity_accepted) a FROM goods_receipt_lines GROUP BY 1) g
+                USING (po_line_id) WHERE g.a <> l.received_quantity)"""),
+    ("Every PO comes from an approved requisition; approvals follow the matrix",
+     """SELECT (SELECT COUNT(*) FROM purchase_orders po JOIN purchase_requisitions r USING (requisition_id) WHERE r.status <> 'CONVERTED')
+             + (SELECT COUNT(*) FROM purchase_requisitions r LEFT JOIN purchase_orders po USING (requisition_id)
+                WHERE (r.status = 'CONVERTED') <> (po.purchase_order_id IS NOT NULL))
+             + (SELECT COUNT(*) FROM purchase_requisitions WHERE
+                (approval_level = 'AUTO' AND estimated_amount >= """ + str(int(ref.APPROVAL_MATRIX[0][0])) + """) OR
+                (approval_level = 'PURCHASING_MANAGER' AND (estimated_amount < """ + str(int(ref.APPROVAL_MATRIX[0][0])) + """ OR estimated_amount >= """ + str(int(ref.APPROVAL_MATRIX[1][0])) + """)) OR
+                (approval_level = 'MANAGING_DIRECTOR' AND estimated_amount < """ + str(int(ref.APPROVAL_MATRIX[1][0])) + """))"""),
+    ("Invoices on hold are not posted or paid",
+     """SELECT (SELECT COUNT(*) FROM supplier_invoices WHERE status = 'ON_HOLD' AND (approved_date IS NOT NULL OR total_amount IS NOT NULL))
+             + (SELECT COUNT(*) FROM supplier_payments p JOIN supplier_invoices s USING (supplier_invoice_id)
+                WHERE s.approved_date IS NULL OR p.payment_date < s.approved_date)"""),
+    ("One preferred supplier per product, matching products.primary_supplier_id",
+     """SELECT (SELECT COUNT(*) FROM (SELECT product_id FROM supplier_products GROUP BY 1 HAVING SUM(is_preferred) <> 1))
+             + (SELECT COUNT(*) FROM products p JOIN supplier_products sp ON sp.product_id = p.product_id AND sp.is_preferred = 1
+                WHERE sp.supplier_id <> p.primary_supplier_id)"""),
 ]
 
 METRICS = """
@@ -74,6 +105,19 @@ def print_summary(con: sqlite3.Connection):
     print(f"  Order status mix      : {dict(con.execute('SELECT status, COUNT(*) FROM sales_orders GROUP BY 1').fetchall())}")
     print(f"  Fill (ship) lead days : {q('SELECT ROUND(AVG(julianday(ship_date)-julianday(order_date)),2) FROM deliveries JOIN sales_orders USING (sales_order_id)')}")
     print(f"  Invoice status mix    : {dict(con.execute('SELECT status, COUNT(*) FROM sales_invoices GROUP BY 1').fetchall())}")
+    print("\nProcurement")
+    for label, sql in [
+        ("Requisitions by status ", "SELECT status, COUNT(*) FROM purchase_requisitions GROUP BY 1"),
+        ("Approval levels        ", "SELECT approval_level, COUNT(*) FROM purchase_requisitions GROUP BY 1"),
+        ("PO status mix          ", "SELECT status, COUNT(*) FROM purchase_orders GROUP BY 1"),
+        ("Invoice match results  ", "SELECT match_status, COUNT(*) FROM supplier_invoices GROUP BY 1"),
+        ("Exception resolutions  ", "SELECT COALESCE(resolution,'(on hold)'), COUNT(*) FROM supplier_invoices WHERE match_status='EXCEPTION' GROUP BY 1"),
+        ("RFQs by status         ", "SELECT status, COUNT(*) FROM rfqs GROUP BY 1"),
+    ]:
+        print(f"  {label}: {dict(con.execute(sql).fetchall())}")
+    print(f"  On-time first delivery : {q("SELECT ROUND(100.0*SUM(g.receipt_date<=po.expected_date)/COUNT(*),1) FROM goods_receipts g JOIN purchase_orders po USING(purchase_order_id) WHERE g.delivery_no=1")}%")
+    print(f"  Avg PO lines           : {q('SELECT ROUND(AVG(n),2) FROM (SELECT COUNT(*) n FROM purchase_order_lines GROUP BY purchase_order_id)')}")
+    print(f"  Purchase price variance: {q("SELECT ROUND(SUM(debit-credit),2) FROM journal_lines WHERE account_code='5200'"):,.2f} THB")
     print(f"  Closing cash (THB)    : {q(chr(10).join(['SELECT ROUND(SUM(debit-credit),2) FROM journal_lines WHERE account_code=' + repr('1000')])):,.2f}")
     print(f"  Closing AR (THB)      : {q('SELECT ROUND(SUM(debit-credit),2) FROM journal_lines WHERE account_code=' + repr('1100')):,.2f}")
     print(f"  Closing inventory     : {q('SELECT ROUND(SUM(debit-credit),2) FROM journal_lines WHERE account_code=' + repr('1200')):,.2f}")

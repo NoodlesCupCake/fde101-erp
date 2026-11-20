@@ -150,6 +150,7 @@ CHART_OF_ACCOUNTS = [
     ("4000", "Sales Revenue", "REVENUE"),
     ("5000", "Cost of Goods Sold", "EXPENSE"),
     ("5100", "Inventory Shrinkage", "EXPENSE"),
+    ("5200", "Purchase Price Variance", "EXPENSE"),
     ("6000", "Salaries & Wages", "EXPENSE"),
     ("6010", "Social Security (Employer)", "EXPENSE"),
     ("6100", "Rent Expense", "EXPENSE"),
@@ -161,3 +162,31 @@ MONTH_SEASONALITY = {1: 0.95, 2: 1.05, 3: 1.12, 4: 0.80, 5: 1.0, 6: 0.95, 7: 0.8
 WEEKDAY_FACTOR = {0: 1.10, 1: 1.05, 2: 1.0, 3: 1.0, 4: 0.95, 5: 0.45, 6: 0.0}  # closed Sundays
 # Fixed-date public holidays (month, day) — closed
 HOLIDAYS = {(1, 1), (4, 6), (4, 13), (4, 14), (4, 15), (5, 1), (6, 3), (7, 28), (8, 12), (10, 13), (10, 23), (12, 5), (12, 10), (12, 31)}
+
+# ---------------- Procurement ----------------
+# Hidden supplier reliability profiles (exported to ground_truth/supplier_reliability.csv)
+#   on_time: P(delivery on/before promised date); late_days: delay range when late
+#   short: P(final delivery short-ships a line); reject: P(a line has damaged units rejected at receipt)
+#   price_err / qty_err: P(an invoice line is billed at a wrong price / for more units than accepted)
+SUPPLIER_PROFILES = {
+    "reliable":   {"weight": 50, "on_time": 0.95, "late_days": (1, 3),  "short": 0.03, "reject": 0.01, "price_err": 0.03, "qty_err": 0.02},
+    "average":    {"weight": 35, "on_time": 0.84, "late_days": (1, 5),  "short": 0.07, "reject": 0.03, "price_err": 0.07, "qty_err": 0.04},
+    "unreliable": {"weight": 15, "on_time": 0.60, "late_days": (2, 12), "short": 0.18, "reject": 0.07, "price_err": 0.14, "qty_err": 0.09},
+}
+
+# Requisition approval matrix by estimated value (THB, excl. VAT): (upper bound, level, approver, days to decide, reject prob)
+APPROVAL_MATRIX = [
+    (50_000, "AUTO", None, (0, 0), 0.0),
+    (300_000, "PURCHASING_MANAGER", "PUR_HEAD", (1, 3), 0.04),
+    (float("inf"), "MANAGING_DIRECTOR", "MD", (2, 6), 0.08),
+]
+REJECT_REASONS = ["Quantity exceeds forecast demand", "Budget hold this month", "Transfer stock from another warehouse instead",
+                  "Duplicate of an open request", "Wait for sourcing event (RFQ) result"]
+
+# Items of the same supplier+warehouse below this × reorder point are topped up when a PO is raised
+CONSOLIDATION_FACTOR = 1.35
+
+# Three-way match tolerance: price within 1% on every line AND total variance within THB 1,000 → auto-approve
+MATCH_PRICE_TOLERANCE = 0.01
+MATCH_AMOUNT_TOLERANCE = 1_000
+GR_REJECT_REASONS = ["Damaged packaging", "Wrong specification", "Expired / defective", "Broken in transit"]
