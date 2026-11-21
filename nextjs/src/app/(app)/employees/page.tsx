@@ -1,5 +1,8 @@
+import { Pager } from "@/components/pager";
 import { TypeBadges } from "@/components/type-badges";
-import { getCurrentEmployee, type UserType } from "@/lib/dal";
+import { cursorPage } from "@/lib/cursor";
+import { getCurrentEmployee } from "@/lib/dal";
+import { typesForPage } from "@/lib/employee-types";
 import { date, thb } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 
@@ -14,39 +17,37 @@ type Row = {
   termination_date: string | null;
   departments: { code: string } | null;
 };
+type Salary = { employee_id: number; monthly_salary: number };
 
 /** Directory. Salaries only appear for HR: the database never sends them to anyone else. */
-export default async function Employees() {
+export default async function Employees({ searchParams }: PageProps<"/employees">) {
   const me = await getCurrentEmployee();
   const isHR = me.types.includes("hr");
+  const sp = await searchParams;
   const supabase = await createClient();
 
-  const [emps, roles, salaries] = await Promise.all([
+  const page = await cursorPage<Row>({
+    search: sp, size: 20, keys: ["employee_code"], descending: false,
     // monthly_salary isn't in this select on purpose: signed-in users have no column privilege for it.
-    supabase.from("employees")
-      .select("employee_id, employee_code, first_name, last_name, job_title, manager_id, is_active, termination_date, departments(code)")
-      .order("employee_code").returns<Row[]>(),
-    supabase.from("employee_roles").select("employee_id, role").returns<{ employee_id: number; role: UserType }[]>(),
-    isHR ? supabase.rpc("visible_salaries") : Promise.resolve({ data: [] }),
+    query: () => supabase.from("employees")
+      .select("employee_id, employee_code, first_name, last_name, job_title, manager_id, is_active, termination_date, departments(code)"),
+    keyOf: (r) => [r.employee_code],
+  });
+  const ids = page.rows.map((r) => r.employee_id);
+  const [{ typesOf, managerName }, salaries] = await Promise.all([
+    typesForPage(supabase, ids, page.rows.flatMap((r) => (r.manager_id ? [r.manager_id] : []))),
+    isHR ? supabase.rpc("visible_salaries").in("employee_id", ids) : Promise.resolve({ data: [] }),
   ]);
-  if (emps.error) throw new Error(emps.error.message);
-
-  const rows = emps.data ?? [];
-  const byId = new Map(rows.map((r) => [r.employee_id, r]));
-  const managers = new Set(rows.filter((r) => r.is_active && r.manager_id).map((r) => r.manager_id));
-  type Salary = { employee_id: number; monthly_salary: number };
   const salary = new Map(((salaries.data ?? []) as Salary[]).map((s) => [s.employee_id, s.monthly_salary]));
-  const typesOf = (r: Row): UserType[] => [
-    "employee",
-    ...(managers.has(r.employee_id) ? (["manager"] as const) : []),
-    ...(roles.data ?? []).filter((x) => x.employee_id === r.employee_id).map((x) => x.role).sort(),
-  ];
 
   return (
     <div className="rounded-xl border border-line bg-surface">
-      <div className="border-b border-line px-5 py-3">
-        <h1 className="font-semibold">Employees</h1>
-        <p className="text-sm text-muted">{isHR ? "You are HR, so you can see salaries." : "Salaries are visible to HR only."}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-3">
+        <div>
+          <h1 className="font-semibold">Employees</h1>
+          <p className="text-sm text-muted">{isHR ? "You are HR, so you can see salaries." : "Salaries are visible to HR only."}</p>
+        </div>
+        <Pager base="/employees" prev={page.prev} next={page.next} />
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -60,8 +61,7 @@ export default async function Employees() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((e) => {
-              const mgr = e.manager_id ? byId.get(e.manager_id) : null;
+            {page.rows.map((e) => {
               const active = e.is_active && !e.termination_date;
               return (
                 <tr key={e.employee_id} className={`border-t border-line ${e.employee_id === me.employee_id ? "bg-brand/5" : ""} ${active ? "" : "opacity-60"}`}>
@@ -69,8 +69,8 @@ export default async function Employees() {
                   <td className="whitespace-nowrap px-4 py-2">{e.first_name} {e.last_name}</td>
                   <td className="px-4 py-2">{e.departments?.code}</td>
                   <td className="px-4 py-2">{e.job_title}</td>
-                  <td className="whitespace-nowrap px-4 py-2 text-muted">{mgr ? `${mgr.first_name} ${mgr.last_name}` : "–"}</td>
-                  <td className="px-4 py-2">{active ? <TypeBadges types={typesOf(e)} /> : null}</td>
+                  <td className="whitespace-nowrap px-4 py-2 text-muted">{(e.manager_id && managerName.get(e.manager_id)) || "–"}</td>
+                  <td className="px-4 py-2">{active ? <TypeBadges types={typesOf(e.employee_id)} /> : null}</td>
                   {isHR && <td className="px-4 py-2 text-right tabular-nums">{thb(salary.get(e.employee_id) ?? null)}</td>}
                   <td className="whitespace-nowrap px-4 py-2">{active ? <span className="text-ok">Active</span> : <span className="text-danger">Left {date(e.termination_date)}</span>}</td>
                 </tr>
