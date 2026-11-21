@@ -53,6 +53,38 @@ author reviewed the result.
 - **Watch secrets and side effects**: the agent masked keys, kept password hashes out of git, and
   asked before outward-facing actions.
 
+## Next.js app (`nextjs/`, deployed on Vercel)
+
+Signed-in pages read Supabase **as the user**, so Row Level Security applies to every query. Demo presets on
+`/login` sign in as one account per role (password stays on the server, `DEMO_PASSWORD`).
+
+### User types
+
+| Type | Stored where | Rule |
+|---|---|---|
+| Employee | derived | active row in `employees` (`is_active` and no `termination_date`), matched to the login by email |
+| Manager | derived | has at least one active employee whose `manager_id` points to them |
+| HR | `employee_roles` | seeded from department `HRA`; admins can change it |
+| Admin | `employee_roles` | can CRUD users and change types; the last admin can't be removed |
+
+Types stack (E0057 is Manager + HR).
+
+### Role × action matrix
+
+| Action | Employee | Manager | HR | Admin | Enforced by |
+|---|---|---|---|---|---|
+| See own salary | ✅ | ✅ | ✅ | ✅ | `current_employee()`, `visible_salaries()` |
+| See other people's salary | ❌ | ❌ | ✅ | ❌ | no column privilege on `employees.monthly_salary`; `visible_salaries()` returns all only for HR |
+| Create / update / terminate users | ❌ | ❌ | ❌ | ✅ | `admin_*_employee()` check `has_role('admin')` |
+| Create / reset / delete logins | ❌ | ❌ | ❌ | ✅ | Admin API from Server Actions after `requireType('admin')`; `auth.users` trigger |
+| Change a user's type | ❌ | ❌ | ❌ | ✅ | RLS on `employee_roles` |
+| Make a leave request | ✅ | ✅ | ✅ | ✅ | Workshop 1.5 |
+| Approve own leave | ❌ | only if no superior | ✅ (any) | ❌ | Workshop 1.5 |
+| Approve subordinates' leave | ❌ | ✅ | ✅ (any) | ❌ | Workshop 1.5 |
+
+Verified by calling the Supabase API directly with one account per role (37/37 checks, including an
+employee trying to read another salary: `HTTP 403 permission denied`).
+
 ## Quick start
 
 ```bash

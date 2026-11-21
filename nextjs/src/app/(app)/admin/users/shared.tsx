@@ -45,7 +45,8 @@ export async function EmployeeFieldset({ value = {}, isNew }: { value?: Employee
         </select>
       </label>
       <label className={label}><span className="font-medium">Monthly salary (THB)</span>
-        <input name="monthly_salary" type="number" min={0} step="0.01" required={isNew} defaultValue={value.monthly_salary ?? ""} className={input} />
+        <input name="monthly_salary" type="number" min={0} step="0.01" required={isNew} defaultValue={value.monthly_salary ?? ""}
+          placeholder={isNew ? "" : "Hidden (HR only). Leave empty to keep it"} className={input} />
       </label>
       {isNew && (
         <>
