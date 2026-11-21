@@ -1,5 +1,6 @@
 import { TypeBadges } from "@/components/type-badges";
 import { requireType, type UserType } from "@/lib/dal";
+import { DEMO_CODES } from "@/lib/demo";
 import { date } from "@/lib/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -85,7 +86,9 @@ export default async function AdminUsers({ searchParams }: PageProps<"/admin/use
                     )}
                   </td>
                   <td className="px-4 py-2">
-                    {user ? (
+                    {user && DEMO_CODES.has(e.employee_code) ? (
+                      <div className="text-xs text-muted">Demo preset login (protected)</div>
+                    ) : user ? (
                       <div className="space-y-1.5">
                         <div className="text-xs text-muted">
                           Has login · last sign-in {user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString("en-GB") : "never"}

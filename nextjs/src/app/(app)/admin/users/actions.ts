@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireType } from "@/lib/dal";
+import { DEMO_CODES } from "@/lib/demo";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -13,6 +14,16 @@ const done = (q: Record<string, string>): never => {
 const num = (v: FormDataEntryValue | null) => Number(v) || 0;
 const str = (v: FormDataEntryValue | null) => String(v ?? "");
 
+/** Demo presets on /login must keep working for everyone: their logins can't be deleted or re-passworded. */
+async function isDemoLogin(userId: string) {
+  const { data } = await createAdminClient().auth.admin.getUserById(userId);
+  const email = data.user?.email;
+  if (!email) return false;
+  const supabase = await createClient();
+  const { data: emp } = await supabase.from("employees").select("employee_code").eq("email", email.toLowerCase()).maybeSingle();
+  return !!emp && DEMO_CODES.has(emp.employee_code);
+}
+
 /** Grant or revoke HR/Admin. Runs as the signed-in admin: RLS (has_role('admin')) is the real check. */
 export async function setType(formData: FormData) {
   const me = await requireType("admin");
@@ -22,6 +33,10 @@ export async function setType(formData: FormData) {
   if (!["hr", "admin"].includes(role)) done({ error: "Unknown type" });
 
   const supabase = await createClient();
+  if (!enable && role === "admin") {
+    const { data: emp } = await supabase.from("employees").select("employee_code").eq("employee_id", employeeId).maybeSingle();
+    if (emp?.employee_code === "E0061") done({ error: "E0061 is the demo Admin preset, so it stays an admin" });
+  }
   const { error } = enable
     ? await supabase.from("employee_roles").insert({ employee_id: employeeId, role, granted_by: me.employee_id })
     : await supabase.from("employee_roles").delete().eq("employee_id", employeeId).eq("role", role);
@@ -52,6 +67,7 @@ export async function resetPassword(formData: FormData) {
   const userId = str(formData.get("user_id"));
   const password = str(formData.get("password"));
   if (password.length < 8) done({ error: "Password must be at least 8 characters" });
+  if (await isDemoLogin(userId)) done({ error: "Demo preset logins can't have their password changed" });
   const { error } = await createAdminClient().auth.admin.updateUserById(userId, { password });
   if (error) done({ error: error.message });
   done({ ok: "Password changed" });
@@ -63,6 +79,7 @@ export async function deleteAccount(formData: FormData) {
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
   if (claims?.claims.sub === userId) done({ error: "You can't delete your own login" });
+  if (await isDemoLogin(userId)) done({ error: "Demo preset logins can't be deleted" });
   const { error } = await createAdminClient().auth.admin.deleteUser(userId);
   if (error) done({ error: error.message });
   done({ ok: "Login deleted" });

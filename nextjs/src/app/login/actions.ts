@@ -2,6 +2,7 @@
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { DEMO_CODES } from "@/lib/demo";
 import { createClient } from "@/lib/supabase/server";
 
 export type FormState = { error?: string; notice?: string; username?: string } | undefined;
@@ -55,6 +56,18 @@ export async function signIn(_prev: FormState, formData: FormData): Promise<Form
     return { error: "This account is not linked to an active employee.", username };
   }
   redirect(safeNext(formData.get("next")));
+}
+
+/** Demo preset: same sign-in flow, but the password comes from the server env, and only for listed demo codes. */
+export async function demoSignIn(prev: FormState, formData: FormData): Promise<FormState> {
+  const code = String(formData.get("code") ?? "");
+  const password = process.env.DEMO_PASSWORD;
+  if (!DEMO_CODES.has(code) || !password) return { error: "Demo sign-in is not available." };
+  const fd = new FormData();
+  fd.set("username", code);
+  fd.set("password", password);
+  fd.set("next", String(formData.get("next") ?? "/"));
+  return signIn(prev, fd);
 }
 
 export async function signUp(_prev: FormState, formData: FormData): Promise<FormState> {
