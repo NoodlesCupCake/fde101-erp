@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FilterBar } from "@/components/filter-bar";
+import { SqlBlock } from "@/components/sql-block";
 import { id, one } from "@/lib/filters";
 import { date, num, thb } from "@/lib/format";
 import { AS_OF, requireStock, type StockRow } from "../data";
+import { skuSql } from "../sql";
 
 type Movement = {
   inventory_txn_id: number; txn_date: string; warehouse: string; txn_type: string; quantity: number; unit_cost: number;
@@ -55,6 +57,9 @@ export default async function ProductStock({ params, searchParams }: PageProps<"
           </div>
         ))}
       </section>
+
+      <SqlBlock title={`check ${product.data.sku} by hand`} sql={skuSql(product.data.sku, warehouse)}
+        note={`Run in Supabase → SQL Editor. on_hand and stock_value should match the cards above${warehouse ? "" : " (summed over warehouses)"}.`} />
 
       <section className="rounded-xl border border-line bg-surface">
         <h2 className="border-b border-line px-5 py-3 font-semibold">Movements</h2>

@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { FilterBar } from "@/components/filter-bar";
+import { SqlBlock } from "@/components/sql-block";
 import { id, one, oneOf } from "@/lib/filters";
 import { date, num, thb } from "@/lib/format";
 import { AS_OF, requireStock, type StockRow } from "./data";
+import { kpiSql, listSql, monthSql } from "./sql";
 import { ValueChart, type MonthPoint } from "./value-chart";
 
 const VIEWS = ["value", "reorder", "dead", "shrinkage"] as const;
@@ -77,10 +79,12 @@ export default async function StockDashboard({ searchParams }: PageProps<"/stock
           </Link>
         ))}
       </section>
+      <SqlBlock title="behind the stock value" sql={kpiSql(warehouse, category)} note="Run in Supabase → SQL Editor. Unfiltered, both numbers are 16,932,503.93." />
 
       <section className="rounded-xl border border-line bg-surface p-5">
         <h2 className="mb-2 font-semibold">Stock value by warehouse, month-end</h2>
         <ValueChart data={monthRows.map((m) => ({ ...m, stock_value: Number(m.stock_value) }))} warehouses={whCodes} />
+        <div className="mt-3"><SqlBlock title="behind this chart" sql={monthSql(warehouse, category)} /></div>
       </section>
 
       <section id="list" className="scroll-mt-4 rounded-xl border border-line bg-surface">
@@ -99,6 +103,7 @@ export default async function StockDashboard({ searchParams }: PageProps<"/stock
             : view === "shrinkage" ? "Stock lost through ADJUSTMENT movements (cycle counts) in the last 12 months."
             : "Every product × warehouse, highest value first."}
         </p>
+        <div className="px-5 pb-3"><SqlBlock title="behind this list" sql={listSql(view, warehouse, category)} note="Same rows as the table below, straight from the raw tables." /></div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-muted">
