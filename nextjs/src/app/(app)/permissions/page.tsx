@@ -13,10 +13,10 @@ const PERMISSIONS: { key: string; action: string; where: string; later?: boolean
   { key: "users.manage", action: "Create / update / terminate users and their logins", where: "admin_*_employee() functions; Admin API only after the same check" },
   { key: "types.manage", action: "Change a user's type (HR / Admin)", where: "RLS on employee_roles (insert/delete)" },
   { key: "permissions.manage", action: "Edit this matrix", where: "RLS on role_permissions; Admin always keeps it" },
-  { key: "leave.request", action: "Make a leave request", where: "Workshop 1.5", later: true },
-  { key: "leave.approve_team", action: "Approve subordinates' leave", where: "Workshop 1.5", later: true },
-  { key: "leave.approve_own_if_top", action: "Approve own leave if they have no superior", where: "Workshop 1.5", later: true },
-  { key: "leave.approve_any", action: "Approve any leave request", where: "Workshop 1.5", later: true },
+  { key: "leave.request", action: "Make a leave request", where: "submit_leave()" },
+  { key: "leave.approve_team", action: "Approve direct reports' leave (manager_id = you)", where: "can_decide_leave() inside decide_leave(); RLS shows your team's requests" },
+  { key: "leave.approve_own_if_top", action: "Approve own leave if they have no superior", where: "can_decide_leave(): own request only when manager_id is null (E0001)" },
+  { key: "leave.approve_any", action: "Approve any leave request, except your own", where: "can_decide_leave(); RLS shows all requests; also manages public_holidays" },
 ];
 
 export default async function Permissions({ searchParams }: PageProps<"/permissions">) {

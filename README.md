@@ -85,6 +85,26 @@ Types stack (E0057 is Manager + HR).
 Verified by calling the Supabase API directly with one account per role (37/37 checks, including an
 employee trying to read another salary: `HTTP 403 permission denied`).
 
+### Leave requests (first feature that writes data)
+
+All writes go through `submit_leave()`, `decide_leave()` and `cancel_leave()`. Signed-in users have **no** insert/update/delete
+privilege on `leave_requests`, so calling the API directly gets the same rules as the UI.
+
+| Decision | Rule |
+|---|---|
+| Types | Annual 6, Sick 30, Personal 3 days per year (Thai Labour Protection Act minimums), in `leave_types` |
+| Past dates | Not allowed, except Sick leave up to 30 days back |
+| Overlap | Rejected if it overlaps your own pending or approved request |
+| Half days | AM/PM, single-day requests only, count 0.5 |
+| Weekends & holidays | Not counted (Sat/Sun + `public_holidays`); 0 working days is rejected. HR maintains the holiday list |
+| Year | One calendar year per request |
+| Balance | Computed (entitlement − approved − pending), never stored; pending days are reserved |
+| Approver | Direct manager (`manager_id`, `leave.approve_team`), or HR (`leave.approve_any`), never yourself, except someone with no superior (`leave.approve_own_if_top`, E0001) |
+| Decisions | Pending only; a rejection needs a comment; only the requester can cancel, while pending |
+
+Verified against the API directly: 28/28 checks, including an employee approving their own request
+(`You can't approve your own request`) and writing to the table (`permission denied`).
+
 ## Quick start
 
 ```bash

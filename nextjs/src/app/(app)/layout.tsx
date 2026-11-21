@@ -10,6 +10,9 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   const nav = [
     { href: "/", label: "Dashboard" },
     { href: "/profile", label: "My profile" },
+    { href: "/leave", label: "Leave" },
+    ...(["leave.approve_team", "leave.approve_any", "leave.approve_own_if_top"].some((p) => me.permissions.includes(p as never))
+      ? [{ href: "/leave/approvals", label: "Approvals" }] : []),
     { href: "/sales-orders", label: "Sales orders" },
     { href: "/employees", label: "Employees" },
     { href: "/permissions", label: "Permissions" },
