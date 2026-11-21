@@ -105,6 +105,19 @@ privilege on `leave_requests`, so calling the API directly gets the same rules a
 Verified against the API directly: 28/28 checks, including an employee approving their own request
 (`You can't approve your own request`) and writing to the table (`permission denied`).
 
+### Stock dashboard (`/stock`)
+
+There is no stock-on-hand table; everything is derived from `inventory_transactions` in Postgres functions
+(`stock_on_hand`, `stock_value_by_month`, `product_movements`), never in the browser. "Today" is 2026-10-31.
+
+- **On hand** = `SUM(quantity)` (signed: + receipts/opening, − shipments/adjustments).
+- **Value** = `SUM(total_cost)`, already at moving-average cost on the way out. The total equals GL 1200 Inventory
+  (฿16,932,503.93). `on hand × latest unit_cost` would drift (e.g. PLMB-0004 at WH-CNX: 205,119.51 vs 205,589.67).
+- **Below reorder point** from `inventory_policies`; **days of cover** = on hand ÷ avg daily units shipped (90 days);
+  **dead stock** = on hand with no shipment in 90 days; **shrinkage** = ADJUSTMENT movements (12 months).
+- **Who can see it**: `stock.view` (Manager, Admin by default) or staff in Warehouse, Purchasing or Finance.
+  RLS on `inventory_transactions` / `inventory_policies` and a check inside every stock function.
+
 ## Quick start
 
 ```bash
