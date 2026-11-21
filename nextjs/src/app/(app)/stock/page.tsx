@@ -9,7 +9,6 @@ const VIEWS = ["value", "reorder", "dead", "shrinkage"] as const;
 const VIEW_LABEL: Record<(typeof VIEWS)[number], string> = {
   value: "All items (by value)", reorder: "Below reorder point", dead: "Dead stock (no sale in 90 days)", shrinkage: "Shrinkage (last 12 months)",
 };
-const LIMIT = 100;
 
 export default async function StockDashboard({ searchParams }: PageProps<"/stock">) {
   const { supabase } = await requireStock();
@@ -32,18 +31,25 @@ export default async function StockDashboard({ searchParams }: PageProps<"/stock
   const below = all.filter((r) => r.below_reorder);
   const dead = all.filter((r) => r.dead_stock);
   const shrink = all.reduce((s, r) => s + Number(r.shrink_value_365d), 0);
-  const kpis = [
-    { label: "Stock value", value: thb(total), note: `${num(all.length)} product × warehouse` },
-    { label: "Below reorder point", value: num(below.length), note: "need a purchase order" },
-    { label: "Dead stock", value: thb(dead.reduce((s, r) => s + Number(r.stock_value), 0)), note: `${dead.length} items, no sale in 90 days` },
-    { label: "Shrinkage, 12 months", value: thb(shrink), note: "from ADJUSTMENT movements" },
+  const shrinkItems = all.filter((r) => r.shrink_units_365d > 0).length;
+  const kpis: { label: string; value: string; note: string; view: (typeof VIEWS)[number]; alert?: boolean }[] = [
+    { label: "Stock value", value: thb(total), note: `${num(all.length)} product × warehouse`, view: "value" },
+    { label: "Below reorder point", value: num(below.length), note: "need a purchase order · show list →", view: "reorder", alert: below.length > 0 },
+    { label: "Dead stock", value: thb(dead.reduce((s, r) => s + Number(r.stock_value), 0)), note: `${dead.length} items, no sale in 90 days →`, view: "dead" },
+    { label: "Shrinkage, 12 months", value: thb(shrink), note: "from ADJUSTMENT movements →", view: "shrinkage" },
   ];
+  const counts: Record<(typeof VIEWS)[number], number> = { value: all.length, reorder: below.length, dead: dead.length, shrinkage: shrinkItems };
+  /** Link to a list, keeping the warehouse/category filters. */
+  const viewHref = (v: (typeof VIEWS)[number]) => {
+    const q = new URLSearchParams({ ...(warehouse ? { warehouse: String(warehouse) } : {}), ...(category ? { category: String(category) } : {}), ...(v === "value" ? {} : { view: v }) });
+    return `/stock${q.size ? `?${q}` : ""}#list`;
+  };
 
   const rows = (view === "reorder" ? [...below].sort((a, b) => (a.on_hand - a.reorder_point) - (b.on_hand - b.reorder_point))
     : view === "dead" ? [...dead].sort((a, b) => b.stock_value - a.stock_value)
     : view === "shrinkage" ? all.filter((r) => r.shrink_units_365d > 0).sort((a, b) => b.shrink_value_365d - a.shrink_value_365d)
     : [...all].sort((a, b) => b.stock_value - a.stock_value));
-  const shown = rows.slice(0, LIMIT);
+  const shown = rows; // all rows: at most 660 (one per inventory_policies row), aggregated in the DB
   const monthRows = (months.data ?? []) as MonthPoint[];
   const whCodes = [...new Set(monthRows.map((m) => m.warehouse))].sort();
   const qs = (extra: Record<string, string>) => new URLSearchParams({ ...(warehouse ? { warehouse: String(warehouse) } : {}), ...extra }).toString();
@@ -63,11 +69,12 @@ export default async function StockDashboard({ searchParams }: PageProps<"/stock
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {kpis.map((k) => (
-          <div key={k.label} className="rounded-xl border border-line bg-surface p-4">
+          <Link key={k.label} href={viewHref(k.view)}
+            className={`rounded-xl border bg-surface p-4 transition hover:border-brand ${view === k.view ? "border-brand ring-1 ring-brand" : "border-line"}`}>
             <div className="text-sm text-muted">{k.label}</div>
-            <div className="mt-1 text-xl font-semibold tabular-nums">{k.value}</div>
+            <div className={`mt-1 text-xl font-semibold tabular-nums ${k.alert ? "text-danger" : ""}`}>{k.value}</div>
             <div className="text-xs text-muted">{k.note}</div>
-          </div>
+          </Link>
         ))}
       </section>
 
@@ -76,11 +83,22 @@ export default async function StockDashboard({ searchParams }: PageProps<"/stock
         <ValueChart data={monthRows.map((m) => ({ ...m, stock_value: Number(m.stock_value) }))} warehouses={whCodes} />
       </section>
 
-      <section className="rounded-xl border border-line bg-surface">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-3">
-          <h2 className="font-semibold">{VIEW_LABEL[view]} <span className="font-normal text-muted">({num(rows.length)}{rows.length > LIMIT ? `, showing ${LIMIT}` : ""})</span></h2>
-          <FilterBar fields={[{ name: "view", type: "select", label: "List", options: VIEWS.filter((v) => v !== "value").map((v) => ({ value: v, label: VIEW_LABEL[v] })) }]} />
+      <section id="list" className="scroll-mt-4 rounded-xl border border-line bg-surface">
+        <div className="flex flex-wrap gap-1 border-b border-line px-3 pt-3" role="tablist" aria-label="Stock lists">
+          {VIEWS.map((v) => (
+            <Link key={v} href={viewHref(v)} role="tab" aria-selected={view === v} scroll={false}
+              className={`-mb-px rounded-t-md border-b-2 px-3 py-2 text-sm ${view === v ? "border-brand font-medium text-brand" : "border-transparent text-muted hover:text-foreground"}`}>
+              {VIEW_LABEL[v]}
+              <span className={`ml-1.5 rounded-full px-1.5 text-xs ${v === "reorder" && counts.reorder > 0 ? "bg-red-600 text-white" : "bg-background text-muted"}`}>{num(counts[v])}</span>
+            </Link>
+          ))}
         </div>
+        <p className="px-5 py-2 text-xs text-muted">
+          {view === "reorder" ? "On hand is below the reorder point in inventory_policies (one per product × warehouse). Most short first."
+            : view === "dead" ? "In stock, but no shipment in the last 90 days. Highest value first."
+            : view === "shrinkage" ? "Stock lost through ADJUSTMENT movements (cycle counts) in the last 12 months."
+            : "Every product × warehouse, highest value first."}
+        </p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-muted">
