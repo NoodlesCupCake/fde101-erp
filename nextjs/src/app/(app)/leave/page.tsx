@@ -20,6 +20,7 @@ export default async function MyLeave({ searchParams }: PageProps<"/leave">) {
     supabase.from("public_holidays").select("holiday_date, name").gte("holiday_date", today).order("holiday_date").limit(5),
   ]);
   const canRequest = me.permissions.includes("leave.request");
+  await supabase.rpc("mark_seen", { p_feed: "my_leave" }); // clears the "new decisions" badge
 
   return (
     <div className="space-y-5">

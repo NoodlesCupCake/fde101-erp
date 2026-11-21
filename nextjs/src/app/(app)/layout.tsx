@@ -4,10 +4,11 @@ import { AccountSwitcher } from "@/components/account-switcher";
 import { Sidebar, type NavGroup } from "@/components/app-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getCurrentEmployee } from "@/lib/dal";
+import { getBadgeCounts } from "./badges";
 
 /** Every page in (app) is protected: the DAL check runs on each request before anything renders. */
 export default async function AppLayout({ children }: LayoutProps<"/">) {
-  const me = await getCurrentEmployee();
+  const [me, counts] = await Promise.all([getCurrentEmployee(), getBadgeCounts()]);
   const approves = ["leave.approve_team", "leave.approve_any", "leave.approve_own_if_top"].some((p) => me.permissions.includes(p as never));
   const groups: NavGroup[] = [
     { items: [
@@ -15,8 +16,8 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
       { href: "/profile", label: "My profile", icon: "☺" },
     ] },
     { title: "Leave", items: [
-      { href: "/leave", label: "My leave", icon: "✈" },
-      ...(approves ? [{ href: "/leave/approvals", label: "Approvals", icon: "✓" }] : []),
+      { href: "/leave", label: "My leave", icon: "✈", badge: "my_leave" },
+      ...(approves ? [{ href: "/leave/approvals", label: "Approvals", icon: "✓", badge: "approvals" as const }] : []),
     ] },
     { title: "Data", items: [
       { href: "/sales-orders", label: "Sales orders", icon: "▤" },
@@ -46,7 +47,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
 
   return (
     <div className="min-h-dvh md:flex">
-      <Sidebar groups={groups} footer={footer} />
+      <Sidebar groups={groups} footer={footer} initialCounts={counts} />
       {/* Only the page content fades on navigation; the sidebar never moves. Filter/search updates don't animate. */}
       <main className="min-w-0 flex-1 px-4 py-6 md:px-8">
         <div className="mx-auto max-w-6xl">

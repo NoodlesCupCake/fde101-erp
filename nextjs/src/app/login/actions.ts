@@ -81,10 +81,13 @@ export async function switchAccount(formData: FormData) {
   const back = safeNext(formData.get("next"));
 
   const supabase = await createClient();
-  await supabase.auth.signOut({ scope: "local" }); // revoke this session first
+  const { error: outError } = await supabase.auth.signOut({ scope: "local" }); // revoke this session first
   const email = await resolveEmail(supabase, code);
-  const { error } = email ? await supabase.auth.signInWithPassword({ email, password }) : { error: true };
-  if (error) redirect("/login?error=switch");
+  const { error } = email ? await supabase.auth.signInWithPassword({ email, password }) : { error: new Error("no email for code") };
+  if (error) {
+    console.warn("[switchAccount] failed:", code, outError?.message, error.message);
+    redirect("/login?error=switch");
+  }
   const { data: employee } = await supabase.rpc("current_employee").maybeSingle();
   if (!employee) {
     await supabase.auth.signOut();

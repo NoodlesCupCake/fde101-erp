@@ -3,17 +3,38 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { getBadgeCounts, type BadgeCounts } from "@/app/(app)/badges";
 
-export type NavItem = { href: string; label: string; icon: string };
+export type NavItem = { href: string; label: string; icon: string; badge?: keyof BadgeCounts };
 export type NavGroup = { title?: string; items: NavItem[] };
 
 const isActive = (path: string, href: string) => (href === "/" ? path === "/" : path === href || path.startsWith(href + "/"));
 
-/** Left sidebar on desktop; on phones a top bar with ☰ opens it as a drawer. */
-export function Sidebar({ groups, footer }: { groups: NavGroup[]; footer: ReactNode }) {
+/** Red notification count; anything over 99 shows as 99+. */
+export function Badge({ n, label }: { n: number; label: string }) {
+  if (n <= 0) return null;
+  return (
+    <span aria-label={`${n} ${label}`}
+      className="ml-auto min-w-5 rounded-full bg-red-600 px-1.5 text-center text-[11px] font-semibold leading-5 text-white tabular-nums">
+      {n > 99 ? "99+" : n}
+    </span>
+  );
+}
+
+/** Left sidebar on desktop; on phones a top bar with ☰ opens it as a drawer. Badges refresh every 30 s and on navigation. */
+export function Sidebar({ groups, footer, initialCounts }: { groups: NavGroup[]; footer: ReactNode; initialCounts: BadgeCounts }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
-  useEffect(() => setOpen(false), [path]);
+  const [counts, setCounts] = useState(initialCounts);
+
+  useEffect(() => {
+    setOpen(false);
+    let alive = true;
+    const refresh = () => getBadgeCounts().then((c) => alive && setCounts(c)).catch(() => {});
+    const t = setTimeout(refresh, 400); // after navigation (e.g. My leave marks decisions as seen)
+    const iv = setInterval(() => document.visibilityState === "visible" && refresh(), 30_000);
+    return () => { alive = false; clearTimeout(t); clearInterval(iv); };
+  }, [path]);
   useEffect(() => {
     if (!open) return;
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
@@ -21,6 +42,7 @@ export function Sidebar({ groups, footer }: { groups: NavGroup[]; footer: ReactN
     return () => removeEventListener("keydown", esc);
   }, [open]);
 
+  const total = groups.flatMap((g) => g.items).reduce((s, n) => s + (n.badge ? counts[n.badge] : 0), 0);
   const brand = (
     <Link href="/" className="flex items-center gap-2 font-semibold">
       <span className="flex size-8 items-center justify-center rounded-md bg-brand text-white" aria-hidden>A</span>
@@ -33,7 +55,14 @@ export function Sidebar({ groups, footer }: { groups: NavGroup[]; footer: ReactN
       {/* phone top bar */}
       <div className="sticky top-0 z-30 flex items-center gap-3 border-b border-line bg-surface px-4 py-2.5 md:hidden">
         <button type="button" onClick={() => setOpen(true)} aria-label="Open menu" aria-expanded={open}
-          className="flex size-9 items-center justify-center rounded-md border border-line">☰</button>
+          className="relative flex size-9 items-center justify-center rounded-md border border-line">
+          ☰
+          {total > 0 && (
+            <span className="absolute -right-1.5 -top-1.5 min-w-5 rounded-full bg-red-600 px-1 text-center text-[10px] font-semibold leading-5 text-white">
+              {total > 99 ? "99+" : total}
+            </span>
+          )}
+        </button>
         {brand}
       </div>
       {open && <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setOpen(false)} aria-hidden />}
@@ -55,7 +84,9 @@ export function Sidebar({ groups, footer }: { groups: NavGroup[]; footer: ReactN
                       <Link href={n.href} aria-current={active ? "page" : undefined}
                         className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors ${
                           active ? "bg-brand/10 font-medium text-brand" : "text-muted hover:bg-background hover:text-foreground"}`}>
-                        <span className="w-4 text-center" aria-hidden>{n.icon}</span>{n.label}
+                        <span className="w-4 text-center" aria-hidden>{n.icon}</span>
+                        {n.label}
+                        {n.badge && <Badge n={counts[n.badge]} label={n.badge === "approvals" ? "waiting for you" : "new decisions"} />}
                       </Link>
                     </li>
                   );

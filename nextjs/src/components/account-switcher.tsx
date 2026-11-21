@@ -27,8 +27,9 @@ export function AccountSwitcher({ current }: { current: string }) {
         className="h-9 whitespace-nowrap rounded-md border border-line px-3 text-sm hover:bg-background">
         {busy ? "Switching…" : "Switch ▾"}
       </button>
-      {open && (
-        <div role="menu" className="absolute bottom-full left-0 z-50 mb-1 w-72 rounded-lg border border-line bg-surface p-1 shadow-lg">
+      {/* Always rendered (hidden when closed) so the forms work even before JavaScript loads */}
+      {(
+        <div role="menu" hidden={!open} className="absolute bottom-full left-0 z-50 mb-1 w-72 rounded-lg border border-line bg-surface p-1 shadow-lg">
           <div className="px-3 py-1.5 text-xs text-muted">Switch to a demo account</div>
           <form action={switchAccount} onSubmit={(e) => setBusy(String((e.nativeEvent as SubmitEvent).submitter?.getAttribute("value")))}>
             <input type="hidden" name="next" value={path.startsWith("/admin") ? "/" : path} />
