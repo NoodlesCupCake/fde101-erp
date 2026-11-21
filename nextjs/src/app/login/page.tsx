@@ -5,11 +5,12 @@ export const metadata: Metadata = { title: "Sign in · A-ERP" };
 
 const ERRORS: Record<string, string> = {
   inactive: "Your account is not linked to an active employee, so you were signed out.",
-  confirm: "That confirmation link is invalid or has expired.",
+  confirm: "That confirmation link is invalid or has expired. Sign in again or register again.",
 };
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const sp = await searchParams;
+  const mode = sp.mode === "register" ? "register" : "signin";
   const next = typeof sp.next === "string" ? sp.next : "/";
   const error = typeof sp.error === "string" ? ERRORS[sp.error] : undefined;
 
@@ -24,11 +25,11 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
           </div>
         </div>
         <div className="rounded-xl border border-line bg-surface p-6 shadow-sm">
-          <h1 className="text-lg font-semibold">Sign in</h1>
+          <h1 className="text-lg font-semibold">{mode === "register" ? "Register" : "Sign in"}</h1>
           <p className="mb-5 mt-1 text-sm text-muted">
-            Use your employee code and password. No account? Ask an administrator.
+            {mode === "register" ? "Create an account with your employee code." : "Use your employee code and password."}
           </p>
-          <AuthForm next={next} initialError={error} />
+          <AuthForm key={mode} mode={mode} next={next} initialError={error} />
         </div>
         <p className="mt-4 text-center text-xs text-muted">Prototype with synthetic data only.</p>
       </div>
