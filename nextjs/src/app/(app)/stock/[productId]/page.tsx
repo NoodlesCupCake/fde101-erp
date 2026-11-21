@@ -42,7 +42,11 @@ export default async function ProductStock({ params, searchParams }: PageProps<"
           <h1 className="text-xl font-semibold">{product.data.name}</h1>
           <p className="text-sm text-muted"><span className="font-mono">{product.data.sku}</span> · {cat?.name} · unit: {product.data.uom}</p>
         </div>
+        <div className="flex flex-wrap items-end gap-2">
+        {warehouse && <Link href={`/procurement/requisitions/new?product=${pid}&warehouse=${warehouse}`}
+          className="h-9 rounded-md bg-brand px-3 py-2 text-sm font-medium text-white hover:opacity-90">+ Create requisition</Link>}
         <FilterBar fields={[{ name: "warehouse", type: "select", label: "Warehouse", options: (warehouses.data ?? []).map((w) => ({ value: String(w.warehouse_id), label: w.code })) }]} />
+        </div>
       </div>
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">

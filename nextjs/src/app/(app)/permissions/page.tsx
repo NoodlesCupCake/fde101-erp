@@ -14,6 +14,8 @@ const PERMISSIONS: { key: string; action: string; where: string; later?: boolean
   { key: "types.manage", action: "Change a user's type (HR / Admin)", where: "RLS on employee_roles (insert/delete)" },
   { key: "permissions.manage", action: "Edit this matrix", where: "RLS on role_permissions; Admin always keeps it" },
   { key: "stock.view", action: "See the stock dashboard", where: "can_view_stock() in every stock function + RLS on inventory tables. Warehouse, Purchasing and Finance staff always can" },
+  { key: "procurement.view", action: "See purchase orders, requisitions, invoices, suppliers", where: "can_view_procurement() in RLS on every procurement table. Purchasing, Warehouse and Finance staff always can" },
+  { key: "requisition.create", action: "Create a purchase requisition", where: "submit_requisition(). Warehouse and Purchasing staff always can. Approval is by job: Purchasing Manager ≤ ฿300k, Managing Director above" },
   { key: "leave.request", action: "Make a leave request", where: "submit_leave()" },
   { key: "leave.approve_team", action: "Approve direct reports' leave (manager_id = you)", where: "can_decide_leave() inside decide_leave(); RLS shows your team's requests" },
   { key: "leave.approve_own_if_top", action: "Approve own leave if they have no superior", where: "can_decide_leave(): own request only when manager_id is null (E0001)" },

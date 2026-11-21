@@ -118,6 +118,26 @@ There is no stock-on-hand table; everything is derived from `inventory_transacti
 - **Who can see it**: `stock.view` (Manager, Admin by default) or staff in Warehouse, Purchasing or Finance.
   RLS on `inventory_transactions` / `inventory_policies` and a check inside every stock function.
 
+### Procurement (`/procurement`)
+
+Requisition → approval → purchase order → goods receipts (several deliveries, rejected units) → supplier invoice
+(three-way match) → payment. Migration `20261121110000_procurement.sql`.
+
+- **Purchase orders**: list with status / supplier / warehouse / date filters (cursor pagination); the detail page shows
+  every document of the PO in order, plus "trace by hand" SQL.
+- **Create a requisition** from a low-stock item (`+ requisition` in Stock → Below reorder point). The supplier is
+  suggested from `supplier_products` (preferred first). `submit_requisition()` computes price, amount and approval level;
+  the client only sends product, warehouse, supplier and quantity.
+- **Approval by amount**: under ฿50,000 auto (PO created at once), ฿50,000–300,000 Purchasing Manager (E0022),
+  over ฿300,000 Managing Director (E0001) only. Tied to the job title, not to a type; nobody approves their own.
+  Queue at `/procurement/requisitions` with a red badge. `decide_requisition()` creates the PO in the same transaction.
+- **Enforced in the database**: writes on all procurement tables are revoked; a trigger on `purchase_orders` refuses any
+  PO whose requisition was not approved at the level its amount needs (tested even as the DB owner).
+- **Invoices on hold** (`/procurement/invoices`): `hold_reason`, exception type and the lines that don't match.
+- **Supplier scorecard** (`/procurement/suppliers`): on-time %, rejection rate, invoice exceptions (`supplier_scorecard()`).
+- **Who can see it**: `procurement.view` (Manager, Admin by default) or Purchasing, Warehouse, Finance staff.
+  `requisition.create`: Manager, Admin by default, or Warehouse / Purchasing staff.
+
 ## Quick start
 
 ```bash

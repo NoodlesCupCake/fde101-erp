@@ -126,6 +126,7 @@ export default async function StockDashboard({ searchParams }: PageProps<"/stock
                   <td className="px-4 py-2 text-right tabular-nums">
                     {num(r.on_hand)}
                     {r.below_reorder && <div className="text-xs text-danger">▼ {num(r.reorder_point - r.on_hand)} short</div>}
+                    {r.below_reorder && <Link href={`/procurement/requisitions/new?product=${r.product_id}&warehouse=${r.warehouse_id}`} className="text-xs text-brand hover:underline">+ requisition</Link>}
                   </td>
                   <td className="px-4 py-2 text-right tabular-nums text-muted">{num(r.reorder_point)}</td>
                   <td className="px-4 py-2 text-right tabular-nums">{thb(r.stock_value)}</td>

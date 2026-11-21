@@ -10,6 +10,9 @@ export const DEMO_ACCOUNTS = [
   { code: "E0059", label: "HR", who: "Pichai I. · HR Officer" },
   { code: "E0057", label: "Manager + HR", who: "Anan S. · HR & Admin Manager" },
   { code: "E0061", label: "Admin", who: "Surasak B. · Admin Officer" },
+  { code: "E0023", label: "Buyer", who: "Purchasing · creates requisitions" },
+  { code: "E0022", label: "Purchasing Manager", who: "approves ฿50k–300k" },
+  { code: "E0001", label: "Managing Director", who: "approves over ฿300k" },
 ] as const;
 
 /** Logins that admins can't delete or re-password (presets + the shared E0002 account handed out earlier). */

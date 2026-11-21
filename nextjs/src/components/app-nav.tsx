@@ -78,7 +78,8 @@ export function Sidebar({ groups, footer, initialCounts }: { groups: NavGroup[];
               {g.title && <div className="px-3 pb-1 text-xs font-medium uppercase tracking-wide text-muted">{g.title}</div>}
               <ul className="space-y-0.5">
                 {g.items.map((n) => {
-                  const active = isActive(path, n.href);
+                  // the most specific item wins (/procurement vs /procurement/requisitions)
+                  const active = isActive(path, n.href) && !groups.some((gg) => gg.items.some((o) => o.href.length > n.href.length && isActive(path, o.href)));
                   return (
                     <li key={n.href}>
                       <Link href={n.href} aria-current={active ? "page" : undefined}
@@ -86,7 +87,7 @@ export function Sidebar({ groups, footer, initialCounts }: { groups: NavGroup[];
                           active ? "bg-brand/10 font-medium text-brand" : "text-muted hover:bg-background hover:text-foreground"}`}>
                         <span className="w-4 text-center" aria-hidden>{n.icon}</span>
                         {n.label}
-                        {n.badge && <Badge n={counts[n.badge]} label={n.badge === "approvals" ? "waiting for you" : "new decisions"} />}
+                        {n.badge && <Badge n={counts[n.badge]} label={n.badge === "my_leave" ? "new decisions" : "waiting for you"} />}
                       </Link>
                     </li>
                   );

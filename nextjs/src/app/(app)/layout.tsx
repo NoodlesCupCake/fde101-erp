@@ -10,7 +10,8 @@ import { getBadgeCounts } from "./badges";
 /** Every page in (app) is protected: the DAL check runs on each request before anything renders. */
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   const supabase = await createClient();
-  const [me, counts, stock] = await Promise.all([getCurrentEmployee(), getBadgeCounts(), supabase.rpc("can_view_stock")]);
+  const [me, counts, stock, { data: procurement }] = await Promise.all([
+    getCurrentEmployee(), getBadgeCounts(), supabase.rpc("can_view_stock"), supabase.rpc("can_view_procurement")]);
   const approves = ["leave.approve_team", "leave.approve_any", "leave.approve_own_if_top"].some((p) => me.permissions.includes(p as never));
   const groups: NavGroup[] = [
     { items: [
@@ -21,6 +22,12 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
       { href: "/leave", label: "My leave", icon: "✈", badge: "my_leave" },
       ...(approves ? [{ href: "/leave/approvals", label: "Approvals", icon: "✓", badge: "approvals" as const }] : []),
     ] },
+    ...(procurement === true ? [{ title: "Procurement", items: [
+      { href: "/procurement", label: "Purchase orders", icon: "⎘" },
+      { href: "/procurement/requisitions", label: "Requisitions", icon: "✎", badge: "requisitions" as const },
+      { href: "/procurement/invoices", label: "Invoices on hold", icon: "⚠" },
+      { href: "/procurement/suppliers", label: "Supplier scorecard", icon: "★" },
+    ] }] : []),
     { title: "Data", items: [
       ...(stock.data === true ? [{ href: "/stock", label: "Stock", icon: "▦" }] : []),
       { href: "/sales-orders", label: "Sales orders", icon: "▤" },
