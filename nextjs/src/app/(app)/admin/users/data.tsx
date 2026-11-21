@@ -2,6 +2,7 @@ import "server-only";
 import Link from "next/link";
 import { TypeBadges } from "@/components/type-badges";
 import { cursorPage } from "@/lib/cursor";
+import { applyEmployeeFilters, type EmployeeFilters } from "@/lib/employee-filters";
 import type { Employee } from "@/lib/dal";
 import { typesForPage } from "@/lib/employee-types";
 import { date } from "@/lib/format";
@@ -15,13 +16,13 @@ type Emp = {
   job_title: string; is_active: boolean; termination_date: string | null;
 };
 
-/** One rendered page of the admin user list (caller must have checked requireType("admin")). */
-export async function adminUsersPage(me: Employee, after?: string) {
+/** One rendered page of the admin user list (caller must have checked requirePermission("users.manage")). */
+export async function adminUsersPage(me: Employee, f: EmployeeFilters, after?: string) {
   const supabase = await createClient();
   const page = await cursorPage<Emp>({
     search: { after }, size: 25, keys: ["employee_code"], descending: false,
-    query: () => supabase.from("employees")
-      .select("employee_id, employee_code, first_name, last_name, email, job_title, is_active, termination_date"),
+    query: () => applyEmployeeFilters(supabase.from("employees")
+      .select("employee_id, employee_code, first_name, last_name, email, job_title, is_active, termination_date"), f),
     keyOf: (r) => [r.employee_code],
   });
   const [{ typesOf }, accounts] = await Promise.all([

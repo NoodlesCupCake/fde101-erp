@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { requireType } from "@/lib/dal";
+import { requirePermission } from "@/lib/dal";
 import { createEmployee } from "../actions";
 import { EmployeeFieldset, Flash } from "../shared";
 
 export default async function NewEmployee({ searchParams }: PageProps<"/admin/users/new">) {
-  await requireType("admin");
+  await requirePermission("users.manage");
   const sp = await searchParams;
   return (
     <div className="max-w-3xl space-y-4">

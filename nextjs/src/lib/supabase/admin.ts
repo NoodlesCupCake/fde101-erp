@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 /**
  * Supabase Admin client (secret key). BYPASSES RLS, so only call it from Server Actions that have
- * already checked `requireType("admin")`. Used only for login-account CRUD (auth.users), which RLS can't cover.
+ * already checked `requirePermission("users.manage")`. Used only for login-account CRUD (auth.users), which RLS can't cover.
  */
 export function createAdminClient() {
   const key = process.env.SUPABASE_SECRET_KEY;

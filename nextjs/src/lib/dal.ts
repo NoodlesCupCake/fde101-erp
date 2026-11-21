@@ -4,6 +4,9 @@ import { cache } from "react";
 import { createClient } from "./supabase/server";
 
 export type UserType = "employee" | "manager" | "hr" | "admin";
+export type Permission =
+  | "salary.read_own" | "salary.read_all" | "users.manage" | "types.manage" | "permissions.manage"
+  | "leave.request" | "leave.approve_team" | "leave.approve_own_if_top" | "leave.approve_any";
 
 export type Employee = {
   employee_id: number;
@@ -15,8 +18,9 @@ export type Employee = {
   department: string;
   department_code: string;
   hire_date: string;
-  monthly_salary: number; // own salary only: public.current_employee() never returns anyone else's
+  monthly_salary: number | null; // own salary only (and only with salary.read_own)
   types: UserType[];
+  permissions: Permission[]; // from role_permissions, through all of this user's types
   manager_code: string | null;
   manager_name: string | null;
   manager_title: string | null;
@@ -43,9 +47,9 @@ export const getCurrentEmployee = cache(async (): Promise<Employee> => {
   return data;
 });
 
-/** Page/action guard for a user type. The database enforces the same rule (RLS + has_role()). */
-export async function requireType(type: UserType): Promise<Employee> {
+/** Page/action guard. The database enforces the same permission (has_permission() in RLS and functions). */
+export async function requirePermission(permission: Permission): Promise<Employee> {
   const me = await getCurrentEmployee();
-  if (!me.types.includes(type)) redirect("/?denied=" + type);
+  if (!me.permissions.includes(permission)) redirect("/?denied=" + permission);
   return me;
 }

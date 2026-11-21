@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireType } from "@/lib/dal";
+import { requirePermission } from "@/lib/dal";
 import { DEMO_CODES } from "@/lib/demo";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -34,7 +34,7 @@ async function loginFor(email: string) {
 
 // ---------------------------------------------------------------- employees (C, U, D = terminate)
 export async function createEmployee(formData: FormData) {
-  await requireType("admin");
+  await requirePermission("users.manage");
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("admin_create_employee", {
     p_first_name: str(formData.get("first_name")),
@@ -58,7 +58,7 @@ export async function createEmployee(formData: FormData) {
 }
 
 export async function updateEmployee(formData: FormData) {
-  await requireType("admin");
+  await requirePermission("users.manage");
   const id = num(formData.get("employee_id"))!;
   const before = await employee(id);
   if (!before) done(formData, { error: "Employee not found" });
@@ -91,7 +91,7 @@ export async function updateEmployee(formData: FormData) {
 }
 
 export async function terminateEmployee(formData: FormData) {
-  await requireType("admin");
+  await requirePermission("users.manage");
   const id = num(formData.get("employee_id"))!;
   const emp = await employee(id);
   if (!emp) done(formData, { error: "Employee not found" });
@@ -106,7 +106,7 @@ export async function terminateEmployee(formData: FormData) {
 }
 
 export async function reactivateEmployee(formData: FormData) {
-  await requireType("admin");
+  await requirePermission("users.manage");
   const supabase = await createClient();
   const { error } = await supabase.rpc("admin_reactivate_employee", { p_employee_id: num(formData.get("employee_id")) });
   if (error) done(formData, { error: error.message });
@@ -116,7 +116,7 @@ export async function reactivateEmployee(formData: FormData) {
 // ---------------------------------------------------------------- types
 /** Grant or revoke HR/Admin. Runs as the signed-in admin: RLS (has_role('admin')) is the real check. */
 export async function setType(formData: FormData) {
-  const me = await requireType("admin");
+  const me = await requirePermission("types.manage");
   const id = num(formData.get("employee_id"))!;
   const role = str(formData.get("role"));
   const enable = formData.get("enable") === "1";
@@ -134,7 +134,7 @@ export async function setType(formData: FormData) {
 
 // ---------------------------------------------------------------- login accounts
 export async function createAccount(formData: FormData) {
-  await requireType("admin");
+  await requirePermission("users.manage");
   const emp = await employee(num(formData.get("employee_id"))!);
   const password = str(formData.get("password"));
   if (password.length < 8) done(formData, { error: "Password must be at least 8 characters" });
@@ -155,7 +155,7 @@ async function isDemoLogin(userId: string) {
 }
 
 export async function resetPassword(formData: FormData) {
-  await requireType("admin");
+  await requirePermission("users.manage");
   const userId = str(formData.get("user_id"));
   const password = str(formData.get("password"));
   if (password.length < 8) done(formData, { error: "Password must be at least 8 characters" });
@@ -166,7 +166,7 @@ export async function resetPassword(formData: FormData) {
 }
 
 export async function deleteAccount(formData: FormData) {
-  await requireType("admin");
+  await requirePermission("users.manage");
   const userId = str(formData.get("user_id"));
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();

@@ -26,7 +26,8 @@ export default async function Profile() {
     ["Job title", me.job_title],
     ["Email", me.email],
     ["Hired", date(me.hire_date)],
-    ["Monthly salary", <span key="s">{thb(me.monthly_salary)} <span className="text-xs text-muted">· only you and HR can see this</span></span>],
+    ["Monthly salary", me.monthly_salary == null ? <span key="s" className="text-muted">Hidden (your types don&apos;t have salary.read_own)</span>
+      : <span key="s">{thb(me.monthly_salary)} <span className="text-xs text-muted">· only you and types with salary.read_all can see this</span></span>],
   ];
 
   return (

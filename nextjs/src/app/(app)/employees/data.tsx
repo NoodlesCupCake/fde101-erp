@@ -1,6 +1,7 @@
 import "server-only";
 import { TypeBadges } from "@/components/type-badges";
 import { cursorPage } from "@/lib/cursor";
+import { applyEmployeeFilters, type EmployeeFilters } from "@/lib/employee-filters";
 import type { Employee } from "@/lib/dal";
 import { typesForPage } from "@/lib/employee-types";
 import { date, thb } from "@/lib/format";
@@ -13,14 +14,14 @@ type Row = {
 type Salary = { employee_id: number; monthly_salary: number };
 
 /** One rendered page of the directory. Salaries are only fetched (and only returned by the DB) for HR. */
-export async function employeesPage(me: Employee, after?: string) {
-  const isHR = me.types.includes("hr");
+export async function employeesPage(me: Employee, f: EmployeeFilters, after?: string) {
+  const isHR = me.permissions.includes("salary.read_all"); // anyone granted salary.read_all
   const supabase = await createClient();
   const page = await cursorPage<Row>({
     search: { after }, size: 25, keys: ["employee_code"], descending: false,
     // monthly_salary isn't selectable for signed-in users (no column privilege), so it's not here.
-    query: () => supabase.from("employees")
-      .select("employee_id, employee_code, first_name, last_name, job_title, manager_id, is_active, termination_date, departments(code)"),
+    query: () => applyEmployeeFilters(supabase.from("employees")
+      .select("employee_id, employee_code, first_name, last_name, job_title, manager_id, is_active, termination_date, departments(code)"), f),
     keyOf: (r) => [r.employee_code],
   });
   const ids = page.rows.map((r) => r.employee_id);

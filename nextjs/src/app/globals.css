@@ -66,18 +66,18 @@ html.theme-switching::view-transition-new(root) {
   z-index: 1;
 }
 
-/* ---------- page transitions (React <ViewTransition default="page"> in the root layout) */
-@keyframes page-out {
-  to { opacity: 0; transform: translateY(-6px) scale(0.99); filter: blur(2px); }
+/* ---------- page transitions: content area only, a short fade (no movement) */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none; /* the rest of the page (header etc.) stays perfectly still */
 }
-@keyframes page-in {
-  from { opacity: 0; transform: translateY(14px) scale(0.985); filter: blur(4px); }
-}
+@keyframes page-out { to { opacity: 0; } }
+@keyframes page-in { from { opacity: 0; } }
 ::view-transition-old(.page) {
-  animation: page-out 180ms ease-in both;
+  animation: page-out 90ms ease-out both;
 }
 ::view-transition-new(.page) {
-  animation: page-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1) 60ms both;
+  animation: page-in 160ms ease-in both;
 }
 
 /* first paint of the login card and app content */

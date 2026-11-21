@@ -1,59 +1,87 @@
 import { TypeBadges } from "@/components/type-badges";
 import { getCurrentEmployee } from "@/lib/dal";
+import { createClient } from "@/lib/supabase/server";
+import { setPermission } from "./actions";
 
-type Cell = "yes" | "no" | string;
-const ROWS: { action: string; cells: [Cell, Cell, Cell, Cell]; where: string }[] = [
-  { action: "See own salary", cells: ["yes", "yes", "yes", "yes"], where: "current_employee() / visible_salaries() return only your own row" },
-  { action: "See other people's salary", cells: ["no", "no", "yes", "no"], where: "No column privilege on employees.monthly_salary; visible_salaries() returns everyone only if has_role('hr')" },
-  { action: "Read the employee directory", cells: ["yes", "yes", "yes", "yes"], where: "RLS: active employees only (current_employee_id() is not null)" },
-  { action: "Create / update / terminate employees", cells: ["no", "no", "no", "yes"], where: "admin_create/update/terminate_employee() raise 'Admins only' unless has_role('admin')" },
-  { action: "Create / reset / delete login accounts", cells: ["no", "no", "no", "yes"], where: "Supabase Admin API, only from Server Actions after requireType('admin'). auth.users trigger still blocks non-employees" },
-  { action: "Change a user's type (HR / Admin)", cells: ["no", "no", "no", "yes"], where: "RLS on employee_roles: insert/delete only if has_role('admin'); the last admin can't be removed" },
-  { action: "Make a leave request", cells: ["yes", "yes", "yes", "yes"], where: "Workshop 1.5" },
-  { action: "Approve own leave request", cells: ["no", "only if no superior", "yes (any)", "no"], where: "Workshop 1.5" },
-  { action: "Approve subordinates' leave", cells: ["no", "yes", "yes (any)", "no"], where: "Workshop 1.5" },
+const ROLES = ["employee", "manager", "hr", "admin"] as const;
+const LABEL: Record<(typeof ROLES)[number], string> = { employee: "Employee", manager: "Manager", hr: "HR", admin: "Admin" };
+
+/** Each permission, what it means, and where the database enforces it. */
+const PERMISSIONS: { key: string; action: string; where: string; later?: boolean }[] = [
+  { key: "salary.read_own", action: "See own salary", where: "current_employee(), visible_salaries()" },
+  { key: "salary.read_all", action: "See other people's salary", where: "visible_salaries(); no column privilege on employees.monthly_salary for anyone" },
+  { key: "users.manage", action: "Create / update / terminate users and their logins", where: "admin_*_employee() functions; Admin API only after the same check" },
+  { key: "types.manage", action: "Change a user's type (HR / Admin)", where: "RLS on employee_roles (insert/delete)" },
+  { key: "permissions.manage", action: "Edit this matrix", where: "RLS on role_permissions; Admin always keeps it" },
+  { key: "leave.request", action: "Make a leave request", where: "Workshop 1.5", later: true },
+  { key: "leave.approve_team", action: "Approve subordinates' leave", where: "Workshop 1.5", later: true },
+  { key: "leave.approve_own_if_top", action: "Approve own leave if they have no superior", where: "Workshop 1.5", later: true },
+  { key: "leave.approve_any", action: "Approve any leave request", where: "Workshop 1.5", later: true },
 ];
-const COLS = ["Employee", "Manager", "HR", "Admin"];
 
-function Mark({ v }: { v: Cell }) {
-  if (v === "yes") return <span className="font-medium text-ok">✓ Can</span>;
-  if (v === "no") return <span className="text-danger">✗ Cannot</span>;
-  return <span className="text-brand">{v}</span>;
-}
-
-/** Role × action matrix. Types stack: a Manager who is also HR gets both columns' "Can"s. */
-export default async function Permissions() {
+export default async function Permissions({ searchParams }: PageProps<"/permissions">) {
   const me = await getCurrentEmployee();
+  const sp = await searchParams;
+  const canEdit = me.permissions.includes("permissions.manage");
+  const supabase = await createClient();
+  const { data } = await supabase.from("role_permissions").select("role, permission, allowed");
+  const allowed = new Set((data ?? []).filter((r) => r.allowed).map((r) => `${r.role}:${r.permission}`));
+
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-semibold">Permissions</h1>
         <p className="text-sm text-muted">
-          Hiding a button is not a permission: every &quot;Cannot&quot; is enforced in the database (RLS, column privileges,
-          or a function that checks the caller). Types stack, so someone who is Manager + HR can do both. You are: <TypeBadges types={me.types} />
+          This matrix is stored in the database (<code>role_permissions</code>), and every rule is enforced there, not by hiding
+          buttons. Types stack: someone who is Manager + HR gets both columns. You are <TypeBadges types={me.types} />
+          {canEdit ? " and can edit it: click a cell to flip it. It takes effect on the next request." : ". Only types with permissions.manage can edit it."}
         </p>
       </div>
+      {typeof sp.ok === "string" && <p role="status" className="rounded-md border border-ok/30 bg-ok/5 px-3 py-2 text-sm text-ok">{sp.ok}</p>}
+      {typeof sp.error === "string" && <p role="alert" className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">{sp.error}</p>}
+
       <div className="overflow-x-auto rounded-xl border border-line bg-surface">
         <table className="w-full text-sm">
           <thead className="text-left text-muted">
             <tr>
               <th className="px-4 py-2 font-medium">Action</th>
-              {COLS.map((c) => <th key={c} className="px-4 py-2 font-medium">{c}</th>)}
+              {ROLES.map((r) => <th key={r} className="px-4 py-2 text-center font-medium">{LABEL[r]}</th>)}
               <th className="px-4 py-2 font-medium">Enforced by</th>
             </tr>
           </thead>
           <tbody>
-            {ROWS.map((r) => (
-              <tr key={r.action} className={`border-t border-line ${r.where === "Workshop 1.5" ? "opacity-60" : ""}`}>
-                <td className="px-4 py-2 font-medium">{r.action}</td>
-                {r.cells.map((c, i) => <td key={i} className="whitespace-nowrap px-4 py-2"><Mark v={c} /></td>)}
-                <td className="px-4 py-2 text-xs text-muted">{r.where}</td>
+            {PERMISSIONS.map((p) => (
+              <tr key={p.key} className="border-t border-line">
+                <td className="px-4 py-2">
+                  <div className="font-medium">{p.action}</div>
+                  <div className="font-mono text-xs text-muted">{p.key}</div>
+                </td>
+                {ROLES.map((role) => {
+                  const on = allowed.has(`${role}:${p.key}`);
+                  const locked = role === "admin" && p.key === "permissions.manage";
+                  const cell = on ? <span className="font-medium text-ok">✓ Can</span> : <span className="text-danger">✗ Cannot</span>;
+                  return (
+                    <td key={role} className="px-2 py-1.5 text-center">
+                      {canEdit && !locked ? (
+                        <form action={setPermission}>
+                          <input type="hidden" name="role" value={role} />
+                          <input type="hidden" name="permission" value={p.key} />
+                          <input type="hidden" name="allowed" value={on ? "0" : "1"} />
+                          <button title={`${on ? "Revoke" : "Grant"} ${p.key} for ${LABEL[role]}`}
+                            className="w-full rounded-md px-2 py-1.5 transition hover:bg-background">{cell}</button>
+                        </form>
+                      ) : (
+                        <span title={locked ? "Locked so nobody gets locked out" : undefined}>{cell}{locked && " 🔒"}</span>
+                      )}
+                    </td>
+                  );
+                })}
+                <td className={`px-4 py-2 text-xs ${p.later ? "text-brand" : "text-muted"}`}>{p.later ? "Workshop 1.5 (saved, not enforced yet)" : p.where}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-muted">Leave rules are planned for Workshop 1.5 and aren&apos;t built yet.</p>
     </div>
   );
 }

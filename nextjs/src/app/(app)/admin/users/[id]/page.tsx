@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { TypeBadges } from "@/components/type-badges";
-import { requireType } from "@/lib/dal";
+import { requirePermission } from "@/lib/dal";
 import { DEMO_CODES } from "@/lib/demo";
 import { typesForPage } from "@/lib/employee-types";
 import { date } from "@/lib/format";
@@ -11,7 +11,7 @@ import { createAccount, deleteAccount, reactivateEmployee, resetPassword, setTyp
 import { btn, EmployeeFieldset, Flash, input } from "../shared";
 
 export default async function EditEmployee({ params, searchParams }: PageProps<"/admin/users/[id]">) {
-  const me = await requireType("admin");
+  const me = await requirePermission("users.manage");
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const supabase = await createClient();
   const { data: e } = await supabase.from("employees")

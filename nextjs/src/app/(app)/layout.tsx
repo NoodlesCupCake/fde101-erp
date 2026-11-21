@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ViewTransition } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { TypeBadges } from "@/components/type-badges";
 import { getCurrentEmployee } from "@/lib/dal";
@@ -12,7 +13,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
     { href: "/sales-orders", label: "Sales orders" },
     { href: "/employees", label: "Employees" },
     { href: "/permissions", label: "Permissions" },
-    ...(me.types.includes("admin") ? [{ href: "/admin/users", label: "Admin" }] : []),
+    ...(me.permissions.includes("users.manage") ? [{ href: "/admin/users", label: "Admin" }] : []),
   ];
   return (
     <div className="min-h-dvh">
@@ -41,7 +42,10 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
           </div>
         </div>
       </header>
-      <main className="animate-rise mx-auto max-w-6xl px-4 py-6">{children}</main>
+      {/* Only the page content fades on navigation; the header never moves. Filter/search updates don't animate. */}
+      <main className="mx-auto max-w-6xl px-4 py-6">
+        <ViewTransition default={{ filter: "none", default: "page" }}>{children}</ViewTransition>
+      </main>
     </div>
   );
 }
