@@ -157,6 +157,30 @@ Order → delivery → invoice → payment. Migration `20261121120000_sales_orde
   customers' orders; a manager also sees everyone below them in the reporting line (Sales Manager E0004 = the team);
   `sales.view_all` (Admin) and Finance / Warehouse see everything. Changing the id in the URL gives "not found".
 
+### Tests (`nextjs/tests/`)
+
+Node's built-in test runner, no extra packages. Needs `nextjs/.env.local` (Supabase URL, publishable key, `DEMO_PASSWORD`).
+
+```bash
+cd nextjs
+npm test                                   # read-only checks against production (79)
+npm run test:writes                        # + checks that create rows: leave (cancelled again), requisitions
+                                           #   (rejected again), 3 sales orders (91 in total)
+BASE_URL=http://localhost:3000 npm test    # the page checks against a local `next start`
+```
+
+| File | Covers |
+|---|---|
+| `1-auth-access` | signed-out visitor → /login, sign-in/out, demo presets, salary column + `visible_salaries` per role, no self-promotion to admin, matrix not editable |
+| `2-leave` | balances, no direct writes, own request can't be self-approved, submit → cancel |
+| `3-stock` | 660 rows, value = GL 1200 (฿16,932,503.93), 75 below reorder at BKK, one SKU by hand, no access for a Sales Rep |
+| `4-procurement` | RLS per role, PO flow page, 9 invoices on hold, scorecard, approval by amount (PM can't approve > ฿300k, nobody else approves), no direct PO insert |
+| `5-sales` | rep sees only own customers' orders (API and URL), manager sees the team, list filters, discount cap, totals = hand calculation, backorder, the real form |
+
+Checks go either straight to the Supabase API with a user's own login (what anyone could do with curl), or through
+the pages like a browser (cookies, redirects, Server Action forms). Sign-ins are cached for 50 minutes in the OS temp
+folder because Supabase Auth rate-limits sign-ins per IP.
+
 ## Quick start
 
 ```bash

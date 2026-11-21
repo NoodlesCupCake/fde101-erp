@@ -4,7 +4,9 @@ import { createClient } from "@/lib/supabase/server";
 /** POST from the Sign out button; GET only when the DAL bounces an inactive employee. */
 async function signOut(request: NextRequest) {
   const supabase = await createClient();
-  await supabase.auth.signOut(); // revokes the refresh token on Supabase and clears the auth cookies
+  // local: end THIS browser's session only (revokes its refresh token, clears the cookies). "global" would also sign out
+  // everyone else using the same account, e.g. classmates sharing E0002.
+  await supabase.auth.signOut({ scope: "local" });
   const url = new URL("/login", request.url);
   if (request.nextUrl.searchParams.get("reason") === "inactive") url.searchParams.set("error", "inactive");
   return NextResponse.redirect(url, { status: 303 });
