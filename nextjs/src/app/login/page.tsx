@@ -5,6 +5,7 @@ import { AuthForm } from "./auth-form";
 export const metadata: Metadata = { title: "Sign in · A-ERP" };
 
 const ERRORS: Record<string, string> = {
+  switch: "Couldn't switch account. Pick a demo user or sign in below.",
   inactive: "Your account is not linked to an active employee, so you were signed out.",
   confirm: "That confirmation link is invalid or has expired. Sign in again or register again.",
 };

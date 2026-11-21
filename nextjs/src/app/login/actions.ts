@@ -70,6 +70,29 @@ export async function demoSignIn(prev: FormState, formData: FormData): Promise<F
   return signIn(prev, fd);
 }
 
+/**
+ * Header "Switch account": end this session and start one as another demo user, in one step.
+ * Same allowlist and server-side password as the demo buttons; the new session is checked like any sign-in.
+ */
+export async function switchAccount(formData: FormData) {
+  const code = String(formData.get("code") ?? "");
+  const password = process.env.DEMO_PASSWORD;
+  if (!DEMO_CODES.has(code) || !password) redirect("/login?error=switch");
+  const back = safeNext(formData.get("next"));
+
+  const supabase = await createClient();
+  await supabase.auth.signOut({ scope: "local" }); // revoke this session first
+  const email = await resolveEmail(supabase, code);
+  const { error } = email ? await supabase.auth.signInWithPassword({ email, password }) : { error: true };
+  if (error) redirect("/login?error=switch");
+  const { data: employee } = await supabase.rpc("current_employee").maybeSingle();
+  if (!employee) {
+    await supabase.auth.signOut();
+    redirect("/login?error=inactive");
+  }
+  redirect(back);
+}
+
 export async function signUp(_prev: FormState, formData: FormData): Promise<FormState> {
   const username = String(formData.get("username") ?? "").trim();
   const password = String(formData.get("password") ?? "");
