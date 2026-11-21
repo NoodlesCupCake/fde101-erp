@@ -16,6 +16,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
     { href: "/sales-orders", label: "Sales orders" },
     { href: "/employees", label: "Employees" },
     { href: "/permissions", label: "Permissions" },
+    { href: "/workshops", label: "Workshops" },
     ...(me.permissions.includes("users.manage") ? [{ href: "/admin/users", label: "Admin" }] : []),
   ];
   return (
