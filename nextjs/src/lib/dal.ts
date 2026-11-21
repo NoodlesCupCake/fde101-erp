@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 import { createClient } from "./supabase/server";
 
+export type UserType = "employee" | "manager" | "hr" | "admin";
+
 export type Employee = {
   employee_id: number;
   employee_code: string;
@@ -11,7 +13,13 @@ export type Employee = {
   email: string;
   job_title: string;
   department: string;
+  department_code: string;
   hire_date: string;
+  monthly_salary: number; // own salary only: public.current_employee() never returns anyone else's
+  types: UserType[];
+  manager_code: string | null;
+  manager_name: string | null;
+  manager_title: string | null;
 };
 
 /**
@@ -34,3 +42,10 @@ export const getCurrentEmployee = cache(async (): Promise<Employee> => {
   if (!data) redirect("/auth/signout?reason=inactive");
   return data;
 });
+
+/** Page/action guard for a user type. The database enforces the same rule (RLS + has_role()). */
+export async function requireType(type: UserType): Promise<Employee> {
+  const me = await getCurrentEmployee();
+  if (!me.types.includes(type)) redirect("/?denied=" + type);
+  return me;
+}

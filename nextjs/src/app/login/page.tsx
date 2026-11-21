@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { AuthForm } from "./auth-form";
 
 export const metadata: Metadata = { title: "Sign in · A-ERP" };
@@ -15,8 +16,9 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const error = typeof sp.error === "string" ? ERRORS[sp.error] : undefined;
 
   return (
-    <main className="flex min-h-dvh items-center justify-center px-4 py-10">
-      <div className="w-full max-w-sm">
+    <main className="relative flex min-h-dvh items-center justify-center px-4 py-10">
+      <ThemeToggle className="absolute right-4 top-4" />
+      <div className="animate-rise w-full max-w-sm">
         <div className="mb-6 flex items-center gap-3">
           <div className="flex size-10 items-center justify-center rounded-lg bg-brand text-lg font-bold text-white" aria-hidden>A</div>
           <div className="leading-tight">

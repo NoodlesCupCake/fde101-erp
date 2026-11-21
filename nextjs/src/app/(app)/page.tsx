@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { TypeBadges } from "@/components/type-badges";
 import { getCurrentEmployee } from "@/lib/dal";
 import { date, num, thb } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
@@ -47,12 +48,14 @@ export default async function Dashboard() {
     <div className="space-y-6">
       <section className="rounded-xl border border-line bg-surface p-5">
         <h1 className="text-xl font-semibold">Welcome, {me.first_name}</h1>
-        <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+        <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3 lg:grid-cols-5">
           <div><dt className="text-muted">Employee code</dt><dd className="font-medium">{me.employee_code}</dd></div>
+          <div><dt className="text-muted">User type(s)</dt><dd className="mt-0.5"><TypeBadges types={me.types} /></dd></div>
+          <div><dt className="text-muted">Reporting manager</dt><dd className="font-medium">{me.manager_name ? `${me.manager_name} (${me.manager_code})` : "None"}</dd></div>
           <div><dt className="text-muted">Department</dt><dd className="font-medium">{me.department}</dd></div>
           <div><dt className="text-muted">Job title</dt><dd className="font-medium">{me.job_title}</dd></div>
-          <div><dt className="text-muted">Hired</dt><dd className="font-medium">{date(me.hire_date)}</dd></div>
         </dl>
+        <Link href="/profile" className="mt-3 inline-block text-sm text-brand hover:underline">View full profile →</Link>
       </section>
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
