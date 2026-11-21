@@ -19,7 +19,6 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
     { href: "/profile", label: "My profile" },
     ...(me.permissions.includes("users.manage") ? [{ href: "/admin/users", label: "Admin: users" }] : []),
     { href: "/permissions", label: "Permissions" },
-    { href: "/workshops", label: "Workshops (grading)" },
   ];
   return (
     <div className="min-h-dvh">
