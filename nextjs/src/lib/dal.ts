@@ -7,7 +7,7 @@ export type UserType = "employee" | "manager" | "hr" | "admin";
 export type Permission =
   | "salary.read_own" | "salary.read_all" | "users.manage" | "types.manage" | "permissions.manage"
   | "leave.request" | "leave.approve_team" | "leave.approve_own_if_top" | "leave.approve_any" | "stock.view"
-  | "procurement.view" | "requisition.create";
+  | "procurement.view" | "requisition.create" | "sales.view_all" | "sales.create";
 
 export type Employee = {
   employee_id: number;

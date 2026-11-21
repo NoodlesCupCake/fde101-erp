@@ -138,6 +138,25 @@ Requisition → approval → purchase order → goods receipts (several deliveri
 - **Who can see it**: `procurement.view` (Manager, Admin by default) or Purchasing, Warehouse, Finance staff.
   `requisition.create`: Manager, Admin by default, or Warehouse / Purchasing staff.
 
+### Sales orders (`/sales-orders`)
+
+Order → delivery → invoice → payment. Migration `20261121120000_sales_orders.sql`.
+
+- **List**: filter by status, customer, sales rep, warehouse, date, search; paged and filtered in the database (cursor
+  pagination over 14k orders); filters live in the URL so a view can be shared.
+- **Detail** (`/sales-orders/[id]`): lines, totals with a ✓ against a hand calculation, and the flow order → delivery →
+  invoice → payments, plus "check by hand" SQL.
+- **Create** (`/sales-orders/new`): customer, products, quantity, discount. `create_sales_order()` takes the price from
+  `products.list_price` and computes `line_amount`, `subtotal`, `vat_amount` (7%) and `total_amount`. The browser only
+  sends ids, quantities and discount %, so a tampered request can't change the money. Discount is capped at the segment
+  rate + 5 (Retail 0, Contractor 4, Wholesale 8), the rule the loaded data follows.
+- **Not enough stock** in the customer's `default_warehouse_id`: the order is still accepted as a **backorder** (stays
+  OPEN, ships when stock arrives; the data cancels backorders after 30 days). The form shows availability per line
+  (on hand − OPEN orders not yet delivered) and the order page says which lines are short.
+- **Who sees what** (RLS on customers, sales_orders and their lines/deliveries/invoices/payments): a rep sees their own
+  customers' orders; a manager also sees everyone below them in the reporting line (Sales Manager E0004 = the team);
+  `sales.view_all` (Admin) and Finance / Warehouse see everything. Changing the id in the URL gives "not found".
+
 ## Quick start
 
 ```bash

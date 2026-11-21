@@ -16,6 +16,8 @@ const PERMISSIONS: { key: string; action: string; where: string; later?: boolean
   { key: "stock.view", action: "See the stock dashboard", where: "can_view_stock() in every stock function + RLS on inventory tables. Warehouse, Purchasing and Finance staff always can" },
   { key: "procurement.view", action: "See purchase orders, requisitions, invoices, suppliers", where: "can_view_procurement() in RLS on every procurement table. Purchasing, Warehouse and Finance staff always can" },
   { key: "requisition.create", action: "Create a purchase requisition", where: "submit_requisition(). Warehouse and Purchasing staff always can. Approval is by job: Purchasing Manager ≤ ฿300k, Managing Director above" },
+  { key: "sales.view_all", action: "See every sales order and customer", where: "RLS on customers, sales_orders and their lines/deliveries/invoices/payments. Without it: own customers, plus everyone below you in the reporting line. Finance and Warehouse always can" },
+  { key: "sales.create", action: "Create a sales order", where: "create_sales_order(): price from list_price, totals computed in the DB. Sales staff always can, only for customers they can see" },
   { key: "leave.request", action: "Make a leave request", where: "submit_leave()" },
   { key: "leave.approve_team", action: "Approve direct reports' leave (manager_id = you)", where: "can_decide_leave() inside decide_leave(); RLS shows your team's requests" },
   { key: "leave.approve_own_if_top", action: "Approve own leave if they have no superior", where: "can_decide_leave(): own request only when manager_id is null (E0001)" },
