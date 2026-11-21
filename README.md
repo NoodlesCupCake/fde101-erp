@@ -81,27 +81,29 @@ Single-port mode: `cd web && npm run build` creates `web/dist`. The API then ser
 http://127.0.0.1:8010 (restart uvicorn after the first build). Ports 8000 and 5173 are avoided
 because they're often taken by OrbStack/Docker.
 
-### Sign-in (local accounts in SQLite)
+### Sign-in (Supabase Auth)
 
-Accounts and sessions are stored in `data/auth.sqlite`, separate from `erp.sqlite`, so regenerating
-the dataset keeps them. Nothing external is needed.
+Sign-in and sign-out use **Supabase Auth** (project FDE101). The browser signs in with `supabase-js`, and
+every API request carries the Supabase access token, which the API verifies itself (`src/erp_api/auth.py`).
 
-```bash
-uv run python -m erp_api.users create --email you@company.com --name "Your Name"   # prints a generated password
-uv run python -m erp_api.users create --email boss@company.com --admin --password 'Choose-A-Good-One'
-uv run python -m erp_api.users list
-uv run python -m erp_api.users set-password --email you@company.com   # also signs that user out everywhere
-uv run python -m erp_api.users disable --email you@company.com
-```
+1. Create `web/.env.local` (git-ignored) with the project URL and the **publishable** key
+   (`supabase projects api-keys`). Never put the secret key in it:
+   ```
+   VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+   VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+   ```
+2. Create accounts in the Supabase dashboard: **Authentication → Users → Add user → Create new user**,
+   with **Auto Confirm User** ticked. Public sign-up is off (`enable_signup = false` in `supabase/config.toml`).
+3. To make someone an admin, set `{"role": "admin"}` in their **app_metadata** (users can't change it themselves).
 
-- **Passwords:** hashed with scrypt (Python standard library, random salt per user). Minimum length is 8.
-- **Sessions:** a random token in an `HttpOnly`, `SameSite=Lax` cookie, valid for 7 days. The database
-  stores only a SHA-256 hash of the token. Signing out deletes the session on the server.
-  Set `ERP_COOKIE_SECURE=1` when serving over HTTPS.
-- **Brute-force protection:** 5 failed sign-ins per email and IP within 15 minutes → `429`.
-- **API:** every `/api/*` route needs a session except `/api/health`, `/api/auth/login` and
-  `/api/auth/logout`. Set `ERP_AUTH_DISABLED=1` to turn auth off for local experiments.
-- **No self sign-up or password-reset email** (there is no mail service); admins create accounts with the CLI above.
+- **API:** every `/api/*` route needs `Authorization: Bearer <access token>` except `/api/health`. The token's
+  signature is checked against the project's public JWKS, along with issuer, audience and expiry. The API reads
+  `SUPABASE_URL`, or falls back to `VITE_SUPABASE_URL` in `web/.env.local`. Set `ERP_AUTH_DISABLED=1` to turn
+  auth off for local experiments.
+- **Sessions:** supabase-js keeps the session in the browser and refreshes the token automatically. Signing out
+  revokes the refresh token on Supabase.
+- **Database:** the ERP tables are also in Supabase (`supabase/migrations/`). RLS is on: signed-in users
+  can read and nobody can write through the Data API.
 
 The app treats the dataset's last posting date (**31 Oct 2026**) as "today", so ageing, YTD and DSO
 figures are meaningful. The API is **read-only** for now, and every data endpoint requires sign-in.
@@ -240,8 +242,7 @@ src/erp_synth/
   validate.py    # integrity checks + summary metrics
 src/erp_api/app.py   # read-only FastAPI JSON API (+ serves web/dist when built)
                      # stock dashboard: GET /api/inventory/dashboard, /api/inventory/items (cached per filter)
-src/erp_api/auth.py  # local auth: scrypt passwords, cookie sessions (data/auth.sqlite)
-src/erp_api/users.py # account admin CLI
+src/erp_api/auth.py  # verifies Supabase access tokens (JWKS)
 web/                 # React frontend (pages/, components/, lib/)
 .claude/skills/ui-ux-pro-max/  # UI/UX design-intelligence skill (MIT, nextlevelbuilder)
 tests/               # smoke tests

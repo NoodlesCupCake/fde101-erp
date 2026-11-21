@@ -12,3 +12,6 @@ web/dist/
 graft/
 .env
 .env.*
+
+# Supabase seed is generated from data/csv (large)
+supabase/seed.sql

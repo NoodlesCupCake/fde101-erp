@@ -2,6 +2,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { useSearchParams } from "react-router";
 import { UNAUTHORIZED_EVENT } from "./auth";
+import { accessToken } from "./supabase";
 
 export type Params = Record<string, string | number | boolean | null | undefined>;
 
@@ -23,8 +24,11 @@ export async function api<T>(path: string, params?: Params): Promise<T> {
   for (const [k, v] of Object.entries(params ?? {})) {
     if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
   }
-  // Session travels as an HttpOnly cookie (same-origin via the Vite proxy / API-served build)
-  const res = await fetch(`/api/${path}${qs.size ? `?${qs}` : ""}`);
+  // Supabase access token goes in the Authorization header; the API verifies it (src/erp_api/auth.py)
+  const token = await accessToken();
+  const res = await fetch(`/api/${path}${qs.size ? `?${qs}` : ""}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
   if (res.status === 401) dispatchEvent(new Event(UNAUTHORIZED_EVENT)); // expired session → login page
   if (!res.ok) {
     let detail = res.statusText;

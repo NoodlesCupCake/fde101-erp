@@ -1,0 +1,33 @@
+-- Signed-in users (Supabase Auth, role 'authenticated') can read ERP data. No write policies: data stays read-only.
+-- Anonymous visitors (anon key) still get nothing.
+CREATE POLICY "authenticated can read" ON public.company FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.departments FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.employees FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.warehouses FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.product_categories FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.suppliers FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.products FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.product_prices FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.inventory_policies FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.supplier_products FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.customers FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.chart_of_accounts FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.sales_orders FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.sales_order_lines FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.deliveries FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.sales_invoices FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.customer_payments FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.purchase_requisitions FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.purchase_requisition_lines FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.rfqs FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.rfq_quotes FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.purchase_orders FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.purchase_order_lines FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.goods_receipts FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.goods_receipt_lines FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.supplier_invoices FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.supplier_invoice_lines FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.supplier_payments FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.inventory_transactions FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.journal_entries FOR SELECT TO authenticated USING (true);
+CREATE POLICY "authenticated can read" ON public.journal_lines FOR SELECT TO authenticated USING (true);

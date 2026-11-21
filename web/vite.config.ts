@@ -6,6 +6,6 @@ const API = process.env.ERP_API ?? "http://127.0.0.1:8010";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  // /api is proxied so the session cookie stays same-origin
+  // /api is proxied to the FastAPI server (requests carry a Supabase bearer token)
   server: { port: 5180, proxy: { "/api": API } },
 });

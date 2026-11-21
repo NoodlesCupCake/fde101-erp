@@ -1,93 +1,79 @@
-"""Local SQLite auth: password hashing, sessions, rate limiting, and the HTTP flow end to end."""
-import sqlite3
-import tempfile
+"""Supabase token verification on the API, end to end over HTTP.
+
+Tokens are signed with a throwaway EC key that stands in for the project's JWKS, so no network is needed.
+"""
+import time
 import unittest
-from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
+import jwt
+from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
 
 from erp_api import auth
 from erp_api.app import app
 
-EMAIL, PASSWORD = "tester@a-erp.test", "Correct-Horse-9"
+URL = "https://example-project.supabase.co"
+KEY = ec.generate_private_key(ec.SECP256R1())
+OTHER_KEY = ec.generate_private_key(ec.SECP256R1())
 
 
-class AuthTestCase(unittest.TestCase):
+def token(key=KEY, **overrides) -> str:
+    claims = {"sub": "0b9c-user", "email": "tester@a-erp.test", "aud": "authenticated", "role": "authenticated",
+              "iss": f"{URL}/auth/v1", "exp": int(time.time()) + 3600,
+              "user_metadata": {"display_name": "Test User"}, "app_metadata": {}}
+    claims.update(overrides)
+    return jwt.encode(claims, key, algorithm="ES256", headers={"kid": "test"})
+
+
+class SupabaseAuthTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.patches = [mock.patch.object(auth, "AUTH_DB", Path(self.tmp.name) / "auth.sqlite"),
+        fake_jwks = SimpleNamespace(get_signing_key_from_jwt=lambda _t: SimpleNamespace(key=KEY.public_key()))
+        self.patches = [mock.patch.object(auth, "supabase_url", lambda: URL),
+                        mock.patch.object(auth, "jwks_client", lambda: fake_jwks),
                         mock.patch.dict("os.environ", {"ERP_AUTH_DISABLED": ""})]
         for p in self.patches:
             p.start()
-        auth._fails.clear()
-        auth.create_user(EMAIL, PASSWORD, "Test User")
+        self.client = TestClient(app)
 
     def tearDown(self):
         for p in self.patches:
             p.stop()
-        self.tmp.cleanup()
 
+    def get(self, path, tok=None):
+        return self.client.get(path, headers={"Authorization": f"Bearer {tok}"} if tok else {})
 
-class PasswordAndSessionTest(AuthTestCase):
-    def test_password_is_hashed_not_stored(self):
-        with sqlite3.connect(auth.AUTH_DB) as con:
-            stored = con.execute("SELECT password_hash FROM users").fetchone()[0]
-        self.assertTrue(stored.startswith("scrypt$"))
-        self.assertNotIn(PASSWORD, stored)
+    def test_health_is_public_data_is_not(self):
+        self.assertEqual(self.get("/api/health").status_code, 200)
+        self.assertEqual(self.get("/api/meta").status_code, 401)
+        self.assertEqual(self.get("/api/auth/me").status_code, 401)
 
-    def test_authenticate(self):
-        self.assertEqual(auth.authenticate(EMAIL.upper(), PASSWORD)["email"], EMAIL)  # email is case-insensitive
-        self.assertIsNone(auth.authenticate(EMAIL, "wrong-password"))
-        self.assertIsNone(auth.authenticate("nobody@a-erp.test", PASSWORD))
-
-    def test_duplicate_and_weak_passwords_rejected(self):
-        with self.assertRaises(ValueError):
-            auth.create_user(EMAIL, "Another-Pass-1")
-        with self.assertRaises(ValueError):
-            auth.create_user("x@a-erp.test", "short")
-
-    def test_session_token_stored_hashed_and_expires(self):
-        user = auth.authenticate(EMAIL, PASSWORD)
-        token, _ = auth.create_session(user["id"], "ua")
-        self.assertEqual(auth.session_user(token)["email"], EMAIL)
-        with sqlite3.connect(auth.AUTH_DB) as con:
-            self.assertNotIn(token, [r[0] for r in con.execute("SELECT token_hash FROM sessions")])
-            con.execute("UPDATE sessions SET expires_at = '2000-01-01T00:00:00+00:00'")
-        self.assertIsNone(auth.session_user(token))
-
-    def test_password_change_revokes_sessions(self):
-        token, _ = auth.create_session(auth.authenticate(EMAIL, PASSWORD)["id"], None)
-        auth.set_password(EMAIL, "Brand-New-Pass-2")
-        self.assertIsNone(auth.session_user(token))
-        self.assertIsNotNone(auth.authenticate(EMAIL, "Brand-New-Pass-2"))
-
-
-class HttpFlowTest(AuthTestCase):
-    def setUp(self):
-        super().setUp()
-        self.client = TestClient(app)
-
-    def test_data_requires_sign_in(self):
-        self.assertEqual(self.client.get("/api/meta").status_code, 401)
-        self.assertEqual(self.client.get("/api/health").status_code, 200)
-
-    def test_login_cookie_access_logout(self):
-        r = self.client.post("/api/auth/login", json={"email": EMAIL, "password": PASSWORD})
+    def test_valid_token(self):
+        r = self.get("/api/auth/me", token())
         self.assertEqual(r.status_code, 200)
-        cookie = r.headers["set-cookie"].lower()
-        self.assertIn("httponly", cookie)
-        self.assertIn("samesite=lax", cookie)
-        self.assertEqual(self.client.get("/api/auth/me").json()["email"], EMAIL)
-        self.assertEqual(self.client.get("/api/meta").status_code, 200)
-        self.assertEqual(self.client.post("/api/auth/logout").status_code, 204)
-        self.assertEqual(self.client.get("/api/auth/me").status_code, 401)
+        self.assertEqual(r.json(), {"id": "0b9c-user", "email": "tester@a-erp.test", "display_name": "Test User", "role": "user"})
 
-    def test_wrong_password_and_rate_limit(self):
-        for _ in range(auth.MAX_FAILS):
-            self.assertEqual(self.client.post("/api/auth/login", json={"email": EMAIL, "password": "nope"}).status_code, 401)
-        # locked out — even the correct password is refused until the window passes
-        self.assertEqual(self.client.post("/api/auth/login", json={"email": EMAIL, "password": PASSWORD}).status_code, 429)
+    def test_role_comes_only_from_app_metadata(self):
+        self.assertEqual(self.get("/api/auth/me", token(user_metadata={"role": "admin"})).json()["role"], "user")
+        self.assertEqual(self.get("/api/auth/me", token(app_metadata={"role": "admin"})).json()["role"], "admin")
+
+    def test_rejected_tokens(self):
+        bad = {
+            "expired": token(exp=int(time.time()) - 60),
+            "wrong audience": token(aud="anon"),
+            "wrong issuer": token(iss="https://evil.supabase.co/auth/v1"),
+            "forged signature": token(key=OTHER_KEY),
+            "garbage": "not-a-jwt",
+        }
+        for name, tok in bad.items():
+            with self.subTest(name):
+                self.assertEqual(self.get("/api/auth/me", tok).status_code, 401)
+
+    def test_unsigned_token_rejected(self):
+        unsigned = jwt.encode({"sub": "x", "aud": "authenticated", "iss": f"{URL}/auth/v1",
+                               "exp": int(time.time()) + 60}, None, algorithm="none")
+        self.assertEqual(self.get("/api/auth/me", unsigned).status_code, 401)
 
 
 if __name__ == "__main__":
