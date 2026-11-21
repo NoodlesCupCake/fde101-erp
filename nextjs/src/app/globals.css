@@ -9,6 +9,9 @@
   --brand: #1d4ed8;
   --danger: #b91c1c;
   --ok: #047857;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
   color-scheme: light;
 }
 
@@ -22,6 +25,9 @@
     --brand: #3b82f6;
     --danger: #f87171;
     --ok: #34d399;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
     color-scheme: dark;
   }
 }
@@ -35,6 +41,9 @@
   --brand: #3b82f6;
   --danger: #f87171;
   --ok: #34d399;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
   color-scheme: dark;
 }
 

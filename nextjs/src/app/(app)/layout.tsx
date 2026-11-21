@@ -4,11 +4,13 @@ import { AccountSwitcher } from "@/components/account-switcher";
 import { Sidebar, type NavGroup } from "@/components/app-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getCurrentEmployee } from "@/lib/dal";
+import { createClient } from "@/lib/supabase/server";
 import { getBadgeCounts } from "./badges";
 
 /** Every page in (app) is protected: the DAL check runs on each request before anything renders. */
 export default async function AppLayout({ children }: LayoutProps<"/">) {
-  const [me, counts] = await Promise.all([getCurrentEmployee(), getBadgeCounts()]);
+  const supabase = await createClient();
+  const [me, counts, stock] = await Promise.all([getCurrentEmployee(), getBadgeCounts(), supabase.rpc("can_view_stock")]);
   const approves = ["leave.approve_team", "leave.approve_any", "leave.approve_own_if_top"].some((p) => me.permissions.includes(p as never));
   const groups: NavGroup[] = [
     { items: [
@@ -20,6 +22,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
       ...(approves ? [{ href: "/leave/approvals", label: "Approvals", icon: "✓", badge: "approvals" as const }] : []),
     ] },
     { title: "Data", items: [
+      ...(stock.data === true ? [{ href: "/stock", label: "Stock", icon: "▦" }] : []),
       { href: "/sales-orders", label: "Sales orders", icon: "▤" },
       { href: "/employees", label: "Employees", icon: "☷" },
     ] },
